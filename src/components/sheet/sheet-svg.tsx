@@ -1,6 +1,6 @@
 // Lámina del plano en SVG con unidades en mm de papel: sirve para pantalla y para imprimir a escala real.
 
-import { dim2d, formatLength } from "@/lib/geometry/dim";
+import { angleAt, arcSweep, circle3, dim2d, formatAngle, formatLength } from "@/lib/geometry/dim";
 import { MARGIN, scaleLabel, sheetSize, TITLE_H, TITLE_W, viewRect, viewToPaper } from "@/lib/drawing/sheet-math";
 import type { SheetData, SheetDim, SheetStyle, SheetTable, SheetView, Vec2 } from "@/lib/types";
 import { DEFAULT_STYLE } from "@/lib/types";
@@ -20,12 +20,155 @@ function segmentsPath(view: SheetView, segs: number[]) {
 export type DimShape = {
   lines: string;
   arrows: string;
-  text: { x: number; y: number; angle: number; value: string };
+  /** symbol «arc»: se dibuja el símbolo ⌒ sobre el número (longitud de arco) */
+  text: { x: number; y: number; angle: number; value: string; symbol?: "arc" };
   hit: string;
 };
 
+type DimInput = Pick<SheetDim, "a" | "b" | "orient" | "offset" | "text" | "kind" | "c" | "p">;
+
+/** Ángulo de un texto sobre una dirección, legible de abajo hacia arriba o de izquierda a derecha. */
+function readable(dx: number, dy: number) {
+  let angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  if (angle > 90.01) angle -= 180;
+  if (angle <= -90.01) angle += 180;
+  return angle;
+}
+
+/** Flecha rellena con la punta en `tip`, abriéndose hacia `back` (vector unitario en papel). */
+function arrowPath(tip: Vec2, back: Vec2, L: number, W: number) {
+  const bx = tip[0] + back[0] * L, by = tip[1] + back[1] * L;
+  const nx = -back[1], ny = back[0];
+  return `M${tip[0]} ${tip[1]}L${bx + nx * W} ${by + ny * W}L${bx - nx * W} ${by - ny * W}Z`;
+}
+
+const unit = (dx: number, dy: number): Vec2 => {
+  const l = Math.hypot(dx, dy) || 1;
+  return [dx / l, dy / l];
+};
+const poly = (pts: Vec2[]) => pts.map((q, i) => `${i ? "L" : "M"}${q[0]} ${q[1]}`).join("");
+
+/** Radios, diámetros, longitudes de arco y ángulos (en papel). */
+function curvedShape(view: SheetView, dim: DimInput, data: SheetData): DimShape | null {
+  const st = styleOf(data);
+  const L = st.dimArrow, W = st.dimArrow * 0.29, gap = st.dimText * 0.33;
+  const P = (q: Vec2) => viewToPaper(view, q);
+  const fmt = (mm: number) => formatLength(mm, data.unit, data.decimals);
+  const { a, b } = dim;
+  const c = dim.c;
+  if (!c) return null;
+
+  if (dim.kind === "radius" || dim.kind === "diameter") {
+    const circ = circle3(a, c, b);
+    if (!circ) return null;
+    const C = circ.center, R = circ.r;
+    const place = dim.p ?? [C[0] + (c[0] - C[0]) * 1.3, C[1] + (c[1] - C[1]) * 1.3];
+    const u = unit(place[0] - C[0], place[1] - C[1]);
+    const Cp = P(C), Q1 = P([C[0] + u[0] * R, C[1] + u[1] * R]), Pp = P(place);
+    const outside = Math.hypot(place[0] - C[0], place[1] - C[1]) > R;
+    const up = unit(Q1[0] - Cp[0], Q1[1] - Cp[1]); // del centro hacia el arco, en papel
+    const cross = `M${Cp[0] - 1.2} ${Cp[1]}L${Cp[0] + 1.2} ${Cp[1]}M${Cp[0]} ${Cp[1] - 1.2}L${Cp[0]} ${Cp[1] + 1.2}`;
+    // Con el centro fuera de la vista (radios grandes), el radio se dibuja corto: del arco al texto
+    const [b0, b1, b2, b3] = view.bounds;
+    const m = 0.05 * Math.max(b2 - b0, b3 - b1);
+    const centerInView = C[0] >= b0 - m && C[0] <= b2 + m && C[1] >= b1 - m && C[1] <= b3 + m;
+    let line: string, arrows: string;
+    if (dim.kind === "radius" && !centerInView) {
+      line = `M${Q1[0]} ${Q1[1]}L${Pp[0]} ${Pp[1]}`;
+      arrows = arrowPath(Q1, outside ? up : [-up[0], -up[1]], L, W);
+      const angle = readable(up[0], up[1]);
+      const rad = (angle * Math.PI) / 180;
+      return {
+        lines: line,
+        arrows,
+        text: { x: Pp[0] + Math.sin(rad) * gap, y: Pp[1] - Math.cos(rad) * gap, angle, value: dim.text?.trim() || "R " + fmt(R) },
+        hit: line,
+      };
+    }
+    if (dim.kind === "radius") {
+      line = `M${Cp[0]} ${Cp[1]}L${(outside ? Pp : Q1)[0]} ${(outside ? Pp : Q1)[1]}`;
+      arrows = arrowPath(Q1, outside ? up : [-up[0], -up[1]], L, W);
+    } else {
+      const Q2 = P([C[0] - u[0] * R, C[1] - u[1] * R]);
+      line = `M${Q2[0]} ${Q2[1]}L${(outside ? Pp : Q1)[0]} ${(outside ? Pp : Q1)[1]}`;
+      arrows = arrowPath(Q1, outside ? up : [-up[0], -up[1]], L, W) + arrowPath(Q2, up, L, W);
+    }
+    const angle = readable(up[0], up[1]);
+    const rad = (angle * Math.PI) / 180;
+    const prefix = dim.kind === "radius" ? "R " : "Ø ";
+    return {
+      lines: cross + line,
+      arrows,
+      text: {
+        x: Pp[0] + Math.sin(rad) * gap,
+        y: Pp[1] - Math.cos(rad) * gap,
+        angle,
+        value: dim.text?.trim() || prefix + fmt(dim.kind === "radius" ? R : 2 * R),
+      },
+      hit: line,
+    };
+  }
+
+  // Arco de cota (longitud de arco o ángulo): centro, radios y barrido en coordenadas de la vista
+  let C: Vec2, r0: number, t0: number, sweep: number, value: string, symbol: "arc" | undefined;
+  const ends: Vec2[] = [];
+  if (dim.kind === "arc") {
+    const circ = circle3(a, c, b);
+    if (!circ) return null;
+    C = circ.center;
+    r0 = circ.r;
+    t0 = Math.atan2(a[1] - C[1], a[0] - C[0]);
+    sweep = arcSweep(C, a, c, b);
+    value = fmt(Math.abs(sweep) * r0);
+    symbol = "arc";
+    ends.push(a, b);
+  } else if (dim.kind === "angle") {
+    C = a;
+    t0 = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    const t1 = Math.atan2(c[1] - a[1], c[0] - a[0]);
+    let d = (((t1 - t0) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    if (d > Math.PI) d -= 2 * Math.PI;
+    sweep = d;
+    r0 = 0;
+    value = formatAngle(angleAt(a, b, c), 1);
+    ends.push(b, c);
+  } else return null;
+
+  const place = dim.p ?? ends[0];
+  const Rd = Math.max(Math.hypot(place[0] - C[0], place[1] - C[1]), 1e-6);
+  const at = (t: number, r = Rd): Vec2 => [C[0] + Math.cos(t) * r, C[1] + Math.sin(t) * r];
+  const N = Math.max(8, Math.ceil((Math.abs(sweep) * 180) / Math.PI / 3));
+  const arcPts = Array.from({ length: N + 1 }, (_, i) => P(at(t0 + (sweep * i) / N)));
+  // Líneas de extensión radiales desde cada extremo hasta el arco de cota (con sobrepaso)
+  let ext = "";
+  for (const [k, e] of ends.entries()) {
+    const t = t0 + (k === 0 ? 0 : sweep);
+    const from = P(e), to = P(at(t));
+    const d = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    if (dim.kind === "angle" && Math.hypot(e[0] - C[0], e[1] - C[1]) >= Rd) continue;
+    if (d < 0.05) continue;
+    const ue = unit(to[0] - from[0], to[1] - from[1]);
+    ext += `M${from[0] + ue[0] * Math.min(0.8, d * 0.3)} ${from[1] + ue[1] * Math.min(0.8, d * 0.3)}L${to[0] + ue[0] * 1.5} ${to[1] + ue[1] * 1.5}`;
+  }
+  const first = arcPts[0], second = arcPts[1], last = arcPts[N], prev = arcPts[N - 1];
+  const arrows = arrowPath(first, unit(second[0] - first[0], second[1] - first[1]), L, W) + arrowPath(last, unit(prev[0] - last[0], prev[1] - last[1]), L, W);
+  const mid = P(at(t0 + sweep / 2));
+  const tan = P(at(t0 + sweep / 2 + 1e-3 * Math.sign(sweep || 1)));
+  const angle = readable(tan[0] - mid[0], tan[1] - mid[1]);
+  const Cp = P(C);
+  const out = unit(mid[0] - Cp[0], mid[1] - Cp[1]);
+  const curve = poly(arcPts);
+  return {
+    lines: ext + curve,
+    arrows,
+    text: { x: mid[0] + out[0] * (gap + st.dimText * 0.35), y: mid[1] + out[1] * (gap + st.dimText * 0.35), angle, value: dim.text?.trim() || value, symbol },
+    hit: curve,
+  };
+}
+
 /** Geometría de una cota sobre el papel: líneas, flechas y texto. */
-export function dimShape(view: SheetView, dim: Pick<SheetDim, "a" | "b" | "orient" | "offset" | "text">, data: SheetData): DimShape | null {
+export function dimShape(view: SheetView, dim: DimInput, data: SheetData): DimShape | null {
+  if (dim.kind && dim.kind !== "linear") return curvedShape(view, dim, data);
   const g = dim2d(dim.a, dim.b, dim.orient, dim.offset);
   if (!g) return null;
   const st = styleOf(data);
@@ -308,17 +451,19 @@ export function SheetSvg({
           <g key={dim.id} data-dim={dim.id}>
             <path d={s.lines} fill="none" stroke={color} strokeWidth={st.dimLine} />
             <path d={s.arrows} fill={color} stroke="none" />
-            <text
-              x={s.text.x}
-              y={s.text.y}
-              fontSize={st.dimText}
-              fontWeight={700}
-              fill={color}
-              textAnchor="middle"
-              transform={`rotate(${s.text.angle} ${s.text.x} ${s.text.y})`}
-            >
-              {s.text.value}
-            </text>
+            <g transform={`rotate(${s.text.angle} ${s.text.x} ${s.text.y})`}>
+              <text x={s.text.x} y={s.text.y} fontSize={st.dimText} fontWeight={700} fill={color} textAnchor="middle">
+                {s.text.value}
+              </text>
+              {s.text.symbol === "arc" && (
+                <path
+                  d={`M${s.text.x - st.dimText * 0.55} ${s.text.y - st.dimText * 1.02}Q${s.text.x} ${s.text.y - st.dimText * 1.5} ${s.text.x + st.dimText * 0.55} ${s.text.y - st.dimText * 1.02}`}
+                  fill="none"
+                  stroke={color}
+                  strokeWidth={st.dimLine * 1.4}
+                />
+              )}
+            </g>
             {onDimPointerDown && (
               <path
                 d={s.hit}

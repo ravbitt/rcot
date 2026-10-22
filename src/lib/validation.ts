@@ -68,8 +68,11 @@ const style = z.object({
 const dim2d = z.object({
   id: z.string().max(40),
   viewId: z.string().max(40),
+  kind: z.enum(["linear", "radius", "diameter", "arc", "angle"]).optional(),
   a: vec2,
   b: vec2,
+  c: vec2.optional(),
+  p: vec2.optional(),
   orient: z.enum(["h", "v", "aligned"]),
   offset: num,
   text: z.string().max(80).nullable(),

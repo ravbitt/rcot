@@ -18,7 +18,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
         <TooltipProvider>{children}</TooltipProvider>
-        <Toaster richColors position="top-center" />
+        <Toaster richColors position="bottom-right" />
       </body>
     </html>
   );

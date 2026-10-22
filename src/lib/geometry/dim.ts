@@ -65,3 +65,45 @@ export function formatLength(mm: number, unit: "mm" | "cm", decimals: number) {
   const trimmed = decimals > 0 ? fixed.replace(/\.?0+$/, "") : fixed;
   return trimmed.replace(".", ",");
 }
+
+// ── Arcos, radios y ángulos (cotas 2D) ─────────────────────────────────
+
+/** Circunferencia que pasa por tres puntos, o null si están alineados. */
+export function circle3(a: Vec2, b: Vec2, c: Vec2): { center: Vec2; r: number } | null {
+  const d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
+  const scale = Math.max(Math.hypot(b[0] - a[0], b[1] - a[1]), Math.hypot(c[0] - a[0], c[1] - a[1]), 1e-9);
+  if (Math.abs(d) < 1e-9 * scale * scale) return null;
+  const a2 = a[0] ** 2 + a[1] ** 2, b2 = b[0] ** 2 + b[1] ** 2, c2 = c[0] ** 2 + c[1] ** 2;
+  const ux = (a2 * (b[1] - c[1]) + b2 * (c[1] - a[1]) + c2 * (a[1] - b[1])) / d;
+  const uy = (a2 * (c[0] - b[0]) + b2 * (a[0] - c[0]) + c2 * (b[0] - a[0])) / d;
+  return { center: [ux, uy], r: Math.hypot(a[0] - ux, a[1] - uy) };
+}
+
+const TAU = Math.PI * 2;
+const wrap = (x: number) => ((x % TAU) + TAU) % TAU;
+
+/**
+ * Barrido (radianes, con signo: positivo antihorario) del arco de centro `c` que va de `a` a `b`
+ * pasando por `m`.
+ */
+export function arcSweep(c: Vec2, a: Vec2, m: Vec2, b: Vec2) {
+  const ta = Math.atan2(a[1] - c[1], a[0] - c[0]);
+  const tm = Math.atan2(m[1] - c[1], m[0] - c[0]);
+  const tb = Math.atan2(b[1] - c[1], b[0] - c[0]);
+  const s = wrap(tb - ta);
+  return wrap(tm - ta) <= s ? s : s - TAU;
+}
+
+/** Ángulo (radianes, 0..π) en el vértice `v` entre las semirrectas hacia `p1` y `p2`. */
+export function angleAt(v: Vec2, p1: Vec2, p2: Vec2) {
+  const a1 = Math.atan2(p1[1] - v[1], p1[0] - v[0]);
+  const a2 = Math.atan2(p2[1] - v[1], p2[0] - v[0]);
+  const d = Math.abs(wrap(a2 - a1));
+  return d > Math.PI ? TAU - d : d;
+}
+
+/** Ángulo en grados con coma decimal y sin ceros sobrantes (45° · 22,5°). */
+export function formatAngle(rad: number, decimals = 1) {
+  const deg = (rad * 180) / Math.PI;
+  return `${deg.toFixed(decimals).replace(/\.?0+$/, "").replace(".", ",")}°`;
+}

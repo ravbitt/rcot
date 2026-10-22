@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dim2d, dim3d, formatLength } from "./dim";
+import { angleAt, arcSweep, circle3, dim2d, dim3d, formatAngle, formatLength } from "./dim";
 
 describe("dim3d", () => {
   it("alineada: mide la distancia real y pasa por el offset", () => {
@@ -39,5 +39,27 @@ describe("formatLength", () => {
     expect(formatLength(25, "cm", 1)).toBe("2,5");
     expect(formatLength(481, "cm", 1)).toBe("48,1");
     expect(formatLength(640, "mm", 0)).toBe("640");
+  });
+});
+
+
+describe("arcos", () => {
+  it("circunferencia por tres puntos", () => {
+    const r = 1280;
+    const p = (deg: number): [number, number] => [r * Math.cos((deg * Math.PI) / 180), 300 + r * Math.sin((deg * Math.PI) / 180)];
+    const c = circle3(p(67.5), p(90), p(112.5))!;
+    expect(c.r).toBeCloseTo(1280, 6);
+    expect(c.center[1]).toBeCloseTo(300, 6);
+    expect(circle3([0, 0], [1, 1], [2, 2])).toBeNull();
+  });
+  it("barrido con sentido según el punto intermedio", () => {
+    expect(arcSweep([0, 0], [1, 0], [0, 1], [-1, 0])).toBeCloseTo(Math.PI);
+    expect(arcSweep([0, 0], [1, 0], [0, -1], [-1, 0])).toBeCloseTo(-Math.PI);
+    expect(Math.abs(arcSweep([0, 0], [1, 0], [Math.SQRT1_2, Math.SQRT1_2], [0, 1]))).toBeCloseTo(Math.PI / 2);
+  });
+  it("ángulo entre semirrectas", () => {
+    expect(formatAngle(angleAt([0, 0], [10, 0], [5, 5]))).toBe("45°");
+    expect(formatAngle(angleAt([0, 0], [10, 0], [-10, 0.0001]))).toBe("180°");
+    expect(formatAngle((22.5 * Math.PI) / 180)).toBe("22,5°");
   });
 });

@@ -14,11 +14,12 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { projectView, renderFill, VIEW_DIRS, viewSnapPoints } from "@/lib/drawing/project";
+import { circle3 } from "@/lib/geometry/dim";
 import { explodeBodies } from "@/lib/geometry/explode";
 import { groupPieces, toRows } from "@/lib/geometry/pieces";
 import { fitScale, MARGIN, paperToView, SCALES, sheetSize, TITLE_H, viewToPaper } from "@/lib/drawing/sheet-math";
 import { fetchMesh, type Body } from "@/lib/geometry/mesh";
-import type { SheetData, SheetDim, SheetDimOrient, SheetSize, SheetStyle, SheetTable, SheetView, TitleBlock, Vec2, ViewKind } from "@/lib/types";
+import type { SheetData, SheetDim, SheetDimKind, SheetDimOrient, SheetSize, SheetStyle, SheetTable, SheetView, TitleBlock, Vec2, ViewKind } from "@/lib/types";
 import { DEFAULT_STYLE } from "@/lib/types";
 import { SHEET_SIZES } from "@/lib/types";
 
@@ -44,8 +45,11 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
   const [vb, setVb] = useState<[number, number, number, number]>([0, 0, W, H]);
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<Drag | null>(null);
-  const [pickA, setPickA] = useState<Pick | null>(null);
-  const [pickB, setPickB] = useState<Pick | null>(null);
+  const [dimKind, setDimKind] = useState<SheetDimKind>("linear");
+  // Puntos elegidos para la cota en preparación (2 para lineales, 3 para arcos, radios y ángulos)
+  const [picks, setPicks] = useState<Pick[]>([]);
+  const pickA = picks[0] ?? null;
+  const needed = dimKind === "linear" ? 2 : 3;
   const [hoverSnap, setHoverSnap] = useState<{ viewId: string; p: Vec2; paper: Vec2 } | null>(null);
   const [cursor, setCursor] = useState<Vec2 | null>(null);
   const first = useRef(true);
@@ -226,11 +230,17 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
 
   /** Cota en preparación según la posición del cursor (orientación automática como en CAD). */
   const draftDim = useMemo((): SheetDim | null => {
-    if (!pickA || !pickB || !cursor) return null;
-    const view = data.views.find((v) => v.id === pickA.viewId);
+    if (picks.length < needed || !cursor) return null;
+    const view = data.views.find((v) => v.id === picks[0].viewId);
     if (!view) return null;
     const m = paperToView(view, cursor);
-    const a = pickA.p, b = pickB.p;
+    if (dimKind !== "linear") {
+      const [p0, p1, p2] = picks.map((q) => q.p);
+      // arcos, radios y diámetros: a = inicio, c = intermedio, b = final; ángulo: a = vértice, b y c = lados
+      const pts = dimKind === "angle" ? { a: p0, b: p1, c: p2 } : { a: p0, c: p1, b: p2 };
+      return { id: "draft", viewId: view.id, kind: dimKind, ...pts, p: m, orient: "aligned", offset: 0, text: null };
+    }
+    const a = picks[0].p, b = picks[1].p;
     let orient: SheetDimOrient = orientMode === "auto" ? "h" : orientMode;
     if (orientMode === "auto") {
       const [x0, x1] = [Math.min(a[0], b[0]), Math.max(a[0], b[0])];
@@ -250,7 +260,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
     }
     const offset = (m[0] - a[0]) * n[0] + (m[1] - a[1]) * n[1];
     return { id: "draft", viewId: view.id, a, b, orient, offset, text: null };
-  }, [pickA, pickB, cursor, data.views, orientMode]);
+  }, [picks, needed, dimKind, cursor, data.views, orientMode]);
 
   // ── Eventos del lienzo ─────────────────────────────────────────────
   function onPointerDown(e: React.PointerEvent<SVGSVGElement>) {
@@ -264,17 +274,22 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
     }
     if (e.button !== 0) return;
     if (tool === "dim") {
-      if (!pickA) {
-        const s = findSnap(paper);
-        if (s) setPickA({ viewId: s.viewId, p: s.p });
-      } else if (!pickB) {
-        const s = findSnap(paper, pickA.viewId);
-        if (s && Math.hypot(s.p[0] - pickA.p[0], s.p[1] - pickA.p[1]) > 1e-6) setPickB({ viewId: s.viewId, p: s.p });
+      if (picks.length < needed) {
+        const s = findSnap(paper, picks[0]?.viewId);
+        if (!s || picks.some((q) => Math.hypot(s.p[0] - q.p[0], s.p[1] - q.p[1]) < 1e-6)) return;
+        if (!picks.length && dimKind !== "linear" && data.views.find((v) => v.id === s.viewId)?.kind.startsWith("iso")) {
+          toast.info("En una isométrica los arcos se ven como elipses: mide radios y arcos en una vista donde se vean de frente.");
+        }
+        setPicks([...picks, { viewId: s.viewId, p: s.p }]);
       } else if (draftDim) {
+        if (dimKind !== "linear" && (dimKind === "angle" ? false : !circle3(draftDim.a, draftDim.c!, draftDim.b))) {
+          toast.error("Los tres puntos están alineados: elige puntos sobre el arco.");
+          setPicks([]);
+          return;
+        }
         const dim = { ...draftDim, id: nanoid(8) };
         update((d) => ({ ...d, dims: [...d.dims, dim] }));
-        setPickA(null);
-        setPickB(null);
+        setPicks([]);
       }
       return;
     }
@@ -311,7 +326,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
     }
     if (tool === "dim") {
       setCursor(paper);
-      setHoverSnap(pickB ? null : findSnap(paper, pickA?.viewId));
+      setHoverSnap(picks.length >= needed ? null : findSnap(paper, picks[0]?.viewId));
     }
   }
 
@@ -355,8 +370,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
     function onKey(e: KeyboardEvent) {
       if ((e.target as HTMLElement).closest("input, textarea, [role=combobox]")) return;
       if (e.key === "Escape") {
-        setPickA(null);
-        setPickB(null);
+        setPicks([]);
         setTool("select");
       } else if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
       else if (e.key.toLowerCase() === "d") setTool("dim");
@@ -380,7 +394,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
   const setView = (id: string, patch: Partial<SheetView>) => update((d) => ({ ...d, views: d.views.map((v) => (v.id === id ? { ...v, ...patch } : v)) }));
 
   const step =
-    tool === "dim" ? (!pickA ? "Clic en el primer punto de una vista" : !pickB ? "Clic en el segundo punto (misma vista)" : "Mueve para ubicar la cota y haz clic") : tool === "text" ? "Clic donde va el texto" : null;
+    tool === "dim" ? dimStep(dimKind, picks.length) : tool === "text" ? "Clic donde va el texto" : null;
 
   return (
     <div className="flex h-[calc(100svh-3.5rem)] min-h-0 flex-col">
@@ -441,8 +455,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
           onValueChange={(v) => {
             if (!v) return;
             setTool(v as Tool);
-            setPickA(null);
-            setPickB(null);
+            setPicks([]);
           }}
         >
           <ToggleGroupItem value="select" title="Seleccionar y mover (V)">
@@ -456,6 +469,35 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
           </ToggleGroupItem>
         </ToggleGroup>
         {tool === "dim" && (
+          <ToggleGroup
+            type="single"
+            size="sm"
+            variant="outline"
+            value={dimKind}
+            onValueChange={(v) => {
+              if (!v) return;
+              setDimKind(v as SheetDimKind);
+              setPicks([]);
+            }}
+          >
+            <ToggleGroupItem value="linear" title="Distancia entre dos puntos">
+              Lineal
+            </ToggleGroupItem>
+            <ToggleGroupItem value="radius" title="Radio: 3 puntos del arco">
+              R
+            </ToggleGroupItem>
+            <ToggleGroupItem value="diameter" title="Diámetro: 3 puntos del arco">
+              Ø
+            </ToggleGroupItem>
+            <ToggleGroupItem value="arc" title="Longitud de arco: inicio, punto intermedio y final">
+              Arco
+            </ToggleGroupItem>
+            <ToggleGroupItem value="angle" title="Ángulo: vértice y un punto de cada lado">
+              Ángulo
+            </ToggleGroupItem>
+          </ToggleGroup>
+        )}
+        {tool === "dim" && dimKind === "linear" && (
           <ToggleGroup type="single" size="sm" variant="outline" value={orientMode} onValueChange={(v) => v && setOrientMode(v as OrientMode)}>
             <ToggleGroupItem value="auto">Auto</ToggleGroupItem>
             <ToggleGroupItem value="h">Horiz.</ToggleGroupItem>
@@ -542,13 +584,12 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
           >
             {/* Capa de edición: imán y cota en preparación */}
             {hoverSnap && <rect x={hoverSnap.paper[0] - 1.2} y={hoverSnap.paper[1] - 1.2} width={2.4} height={2.4} fill="none" stroke="#e8590c" strokeWidth={0.35} />}
-            {pickA && pickView && (
-              <circle cx={viewToPaper(pickView, pickA.p)[0]} cy={viewToPaper(pickView, pickA.p)[1]} r={1} fill="#e8590c" />
-            )}
-            {pickA && !pickB && hoverSnap && pickView && (
+            {pickView &&
+              picks.map((q, i) => <circle key={i} cx={viewToPaper(pickView, q.p)[0]} cy={viewToPaper(pickView, q.p)[1]} r={1} fill="#e8590c" />)}
+            {pickA && picks.length < needed && hoverSnap && pickView && (
               <line
-                x1={viewToPaper(pickView, pickA.p)[0]}
-                y1={viewToPaper(pickView, pickA.p)[1]}
+                x1={viewToPaper(pickView, picks[picks.length - 1].p)[0]}
+                y1={viewToPaper(pickView, picks[picks.length - 1].p)[1]}
                 x2={hoverSnap.paper[0]}
                 y2={hoverSnap.paper[1]}
                 stroke="#e8590c"
@@ -815,6 +856,18 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
       </div>
     </div>
   );
+}
+
+/** Indicación para cada paso de la herramienta de cota. */
+function dimStep(kind: SheetDimKind, n: number) {
+  const steps: Record<SheetDimKind, string[]> = {
+    linear: ["Clic en el primer punto de una vista", "Clic en el segundo punto (misma vista)"],
+    radius: ["Clic en un punto del arco", "Clic en otro punto del arco", "Clic en un tercer punto del arco"],
+    diameter: ["Clic en un punto del arco", "Clic en otro punto del arco", "Clic en un tercer punto del arco"],
+    arc: ["Clic en el inicio del arco", "Clic en un punto intermedio del arco", "Clic en el final del arco"],
+    angle: ["Clic en el vértice del ángulo", "Clic en un punto del primer lado", "Clic en un punto del segundo lado"],
+  };
+  return steps[kind][n] ?? (kind === "linear" ? "Mueve para ubicar la cota y haz clic" : "Mueve para ubicar el texto o la cota y haz clic");
 }
 
 /** Explosión de una vista: se aplica al soltar el deslizador (proyectar toma un momento). */

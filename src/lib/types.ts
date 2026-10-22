@@ -70,12 +70,27 @@ export type SheetView = {
 
 export type SheetDimOrient = "h" | "v" | "aligned";
 
+/**
+ * Tipo de cota 2D:
+ * - linear: entre `a` y `b` (horizontal, vertical o alineada según `orient`, línea a `offset`).
+ * - radius / diameter: arco que pasa por `a`, `c` y `b`; el texto va en `p`.
+ * - arc: longitud del arco de `a` a `b` pasando por `c`; la cota concéntrica pasa por `p`.
+ * - angle: ángulo en el vértice `a` entre las semirrectas hacia `b` y `c`; el arco de cota pasa por `p`.
+ */
+export type SheetDimKind = "linear" | "radius" | "diameter" | "arc" | "angle";
+
 /** Cota 2D sobre una vista: los puntos están en coordenadas de la vista (mm del modelo). */
 export type SheetDim = {
   id: string;
   viewId: string;
+  /** Ausente = linear (cotas creadas antes de los otros tipos) */
+  kind?: SheetDimKind;
   a: Vec2;
   b: Vec2;
+  /** Tercer punto (arcos y ángulos) */
+  c?: Vec2;
+  /** Ubicación del texto o de la línea de cota (arcos y ángulos) */
+  p?: Vec2;
   orient: SheetDimOrient;
   /** Distancia de la línea de cota a los puntos, en mm del modelo (con signo) */
   offset: number;

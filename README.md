@@ -45,9 +45,9 @@ Cambios en el esquema: edita `src/db/schema.ts`, luego `pnpm db:generate` y `pnp
 
 ## Despliegue en Coolify
 
-Todo va en `docker-compose.yml` (app + Postgres + volúmenes): es **un solo recurso** en Coolify.
+Todo va en `docker-compose.yaml` (app + Postgres + volúmenes): es **un solo recurso** en Coolify.
 
-1. **Nuevo recurso** → desde el repositorio Git → Build Pack **Docker Compose** (archivo `docker-compose.yml`).
+1. **Nuevo recurso** → desde el repositorio Git → Build Pack **Docker Compose** (archivo `docker-compose.yaml`).
 2. **Dominio**: en el servicio `app`, asigna tu dominio (p. ej. `https://cotas.tudominio.cl`). Coolify lo
    enruta al puerto interno 3000 y lo entrega a la app como `BETTER_AUTH_URL`.
 3. **Variables de entorno**: Coolify genera solas las credenciales de la base, el secreto de autenticación

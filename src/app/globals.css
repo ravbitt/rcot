@@ -1,26 +1,262 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  --background: oklch(0.99 0.003 275);
+  --foreground: oklch(0.2 0.02 275);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.02 275);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.02 275);
+  --primary: oklch(0.45 0.14 275);
+  --primary-foreground: oklch(0.985 0.005 275);
+  --secondary: oklch(0.96 0.01 275);
+  --secondary-foreground: oklch(0.28 0.04 275);
+  --muted: oklch(0.965 0.006 275);
+  --muted-foreground: oklch(0.52 0.025 275);
+  --accent: oklch(0.95 0.02 275);
+  --accent-foreground: oklch(0.3 0.06 275);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.91 0.01 275);
+  --input: oklch(0.91 0.01 275);
+  --ring: oklch(0.6 0.12 275);
+  --chart-1: oklch(0.55 0.15 275);
+  --chart-2: oklch(0.65 0.13 25);
+  --chart-3: oklch(0.6 0.13 305);
+  --chart-4: oklch(0.65 0.1 200);
+  --chart-5: oklch(0.75 0.12 80);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.975 0.006 275);
+  --sidebar-foreground: oklch(0.25 0.02 275);
+  --sidebar-primary: oklch(0.45 0.14 275);
+  --sidebar-primary-foreground: oklch(0.985 0.005 275);
+  --sidebar-accent: oklch(0.94 0.018 275);
+  --sidebar-accent-foreground: oklch(0.28 0.05 275);
+  --sidebar-border: oklch(0.92 0.01 275);
+  --sidebar-ring: oklch(0.6 0.12 275);
+}
+
+.dark {
+  --background: oklch(0.16 0.012 275);
+  --foreground: oklch(0.96 0.005 275);
+  --card: oklch(0.2 0.015 275);
+  --card-foreground: oklch(0.96 0.005 275);
+  --popover: oklch(0.2 0.015 275);
+  --popover-foreground: oklch(0.96 0.005 275);
+  --primary: oklch(0.72 0.12 275);
+  --primary-foreground: oklch(0.18 0.03 275);
+  --secondary: oklch(0.26 0.02 275);
+  --secondary-foreground: oklch(0.96 0.005 275);
+  --muted: oklch(0.25 0.015 275);
+  --muted-foreground: oklch(0.7 0.02 275);
+  --accent: oklch(0.28 0.03 275);
+  --accent-foreground: oklch(0.96 0.005 275);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.6 0.1 275);
+  --chart-1: oklch(0.65 0.13 275);
+  --chart-2: oklch(0.65 0.13 25);
+  --chart-3: oklch(0.7 0.12 305);
+  --chart-4: oklch(0.72 0.09 200);
+  --chart-5: oklch(0.8 0.11 80);
+  --sidebar: oklch(0.19 0.014 275);
+  --sidebar-foreground: oklch(0.94 0.005 275);
+  --sidebar-primary: oklch(0.72 0.12 275);
+  --sidebar-primary-foreground: oklch(0.18 0.03 275);
+  --sidebar-accent: oklch(0.26 0.025 275);
+  --sidebar-accent-foreground: oklch(0.96 0.005 275);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.6 0.1 275);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+/* ─── Movimiento ─────────────────────────────────────────────────────────────
+   Personalidad «Premium / sereno» (ver .claude/skills/motion-design/ORIGEN.md).
+   Curva de firma sin rebote; las entradas desaceleran. Todo se desactiva con
+   prefers-reduced-motion (el contenido queda visible y quieto). */
+:root {
+  --ease-signature: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-quick: 200ms;
+  --motion-standard: 400ms;
+  --motion-slow: 700ms;
+}
+
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@keyframes reveal-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* El marco de la imagen se asienta mientras el mandala se dibuja (capa secundaria).
+   Sin desvanecer: un cuadro oscuro semitransparente se ve como un «cargando» gris. */
+@keyframes frame-settle {
+  from {
+    transform: scale(0.965);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* Imagen personalizada (informe pagado): se abre desde el centro, como el mandala */
+@keyframes image-iris {
+  from {
+    clip-path: circle(0% at 50% 50%);
+  }
+  to {
+    clip-path: circle(75% at 50% 50%);
+  }
+}
+
+@keyframes bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Entrada temporizada; el retraso se pasa con --reveal-delay */
+  .motion-reveal {
+    animation: reveal-up var(--motion-slow) var(--ease-enter) var(--reveal-delay, 0ms) both;
+  }
+  .motion-fade {
+    animation: reveal-fade var(--motion-standard) var(--ease-signature) var(--reveal-delay, 0ms) both;
+  }
+  .motion-frame {
+    animation: frame-settle var(--motion-slow) var(--ease-enter) var(--reveal-delay, 0ms) both;
+  }
+  .motion-iris {
+    animation: image-iris 1100ms var(--ease-enter) var(--reveal-delay, 0ms) both;
+  }
+
+  /* Aparición al hacer scroll, sin JavaScript. Sin soporte, el contenido queda visible y quieto. */
+  @supports (animation-timeline: view()) {
+    .motion-scroll {
+      animation: reveal-up linear both;
+      animation-timing-function: var(--ease-enter);
+      animation-timeline: view();
+      animation-range: entry 5% entry 60%;
+    }
+    .motion-bar {
+      transform-origin: left center;
+      animation: bar-grow linear both;
+      animation-timing-function: var(--ease-enter);
+      animation-timeline: view();
+      /* Escalonado tipo «ola»: cada barra empieza un poco después (--bar-index) */
+      animation-range: entry calc(20% + var(--bar-index, 0) * 12%) cover calc(35% + var(--bar-index, 0) * 6%);
+    }
+  }
+}
+
+/* ── Visor 3D ─────────────────────────────────────────────── */
+.snap-marker {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #e8590c;
+  background: rgb(255 255 255 / 0.6);
+  pointer-events: none;
+}
+.snap-marker[data-kind="vertex"] { border-radius: 0; }
+.snap-marker[data-kind="midpoint"] { border-radius: 0; transform: rotate(45deg); }
+.snap-marker[data-kind="edge"] { border-radius: 9999px; width: 10px; height: 10px; }
+.snap-marker[data-kind="face"] { border-radius: 9999px; width: 6px; height: 6px; border-width: 1.5px; }
+
+.dim-label {
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 4px;
+  background: #e8590c;
+  color: white;
+  font: 600 12px/1 var(--font-geist-mono), ui-monospace, monospace;
+  padding: 3px 6px;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+}
+.dim-label--selected { background: #1c7ed6; }
+.dim-label--preview { pointer-events: none; opacity: 0.85; }
+
+/* ── Impresión de planos ──────────────────────────────────── */
+@media print {
+  .no-print { display: none !important; }
+  .print-sheet { display: block !important; }
+  html, body { background: white !important; }
 }

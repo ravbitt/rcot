@@ -1,0 +1,55 @@
+import { nanoid } from "nanoid";
+import { db } from "@/db";
+import { model } from "@/db/schema";
+import { ConvertError, convertModel, formatFromName } from "@/lib/convert";
+import { isAdmin } from "@/lib/dal";
+import { deleteStoredFile, MAX_UPLOAD_BYTES, saveFile } from "@/lib/storage";
+
+export const runtime = "nodejs";
+export const maxDuration = 300;
+
+/** Sube un modelo (STEP, IGES o STL), lo convierte a malla y lo registra. */
+export async function POST(request: Request) {
+  if (!(await isAdmin())) return Response.json({ error: "No autorizado" }, { status: 401 });
+  const form = await request.formData().catch(() => null);
+  const file = form?.get("file");
+  if (!(file instanceof File)) return Response.json({ error: "Falta el archivo." }, { status: 400 });
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return Response.json({ error: `El archivo supera ${Math.round(MAX_UPLOAD_BYTES / 1048576)} MB.` }, { status: 413 });
+  }
+  const format = formatFromName(file.name);
+  if (!format) return Response.json({ error: "Formato no admitido. Sube STEP, IGES o STL." }, { status: 400 });
+
+  const name = String(form?.get("name") ?? "").trim() || file.name.replace(/\.[^.]+$/, "");
+  const data = Buffer.from(await file.arrayBuffer());
+  let converted;
+  try {
+    converted = await convertModel(data, format);
+  } catch (err) {
+    const msg = err instanceof ConvertError ? err.message : "No se pudo procesar el modelo.";
+    console.error("convert", err);
+    return Response.json({ error: msg }, { status: 422 });
+  }
+
+  const stored = await saveFile(data, format);
+  const meshFile = await saveFile(converted.gz, "mesh.json.gz");
+  try {
+    const id = nanoid(12);
+    await db.insert(model).values({
+      id,
+      name: name.slice(0, 120),
+      originalName: file.name.slice(0, 200),
+      format,
+      file: stored,
+      meshFile,
+      bytes: file.size,
+      bodyCount: converted.bodyCount,
+      bbox: converted.bbox,
+    });
+    return Response.json({ id });
+  } catch (err) {
+    await deleteStoredFile(stored);
+    await deleteStoredFile(meshFile);
+    throw err;
+  }
+}

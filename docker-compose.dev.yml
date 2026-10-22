@@ -1,0 +1,20 @@
+# Postgres local para desarrollo. Uso: pnpm db:up
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cotas
+      POSTGRES_PASSWORD: cotas
+      POSTGRES_DB: cotas
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cotas"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  pgdata:

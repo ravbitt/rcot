@@ -1,0 +1,64 @@
+import { z } from "zod";
+
+const num = z.number().finite();
+export const vec3 = z.tuple([num, num, num]);
+export const vec2 = z.tuple([num, num]);
+
+export const dimensionInput = z.object({
+  a: vec3,
+  b: vec3,
+  offset: vec3,
+  axis: z.enum(["aligned", "x", "y", "z"]),
+  label: z.string().trim().max(80).nullable().optional(),
+});
+
+export const dimensionPatch = z.object({
+  offset: vec3.optional(),
+  axis: z.enum(["aligned", "x", "y", "z"]).optional(),
+  label: z.string().trim().max(80).nullable().optional(),
+});
+
+const view = z.object({
+  id: z.string().max(40),
+  kind: z.enum(["iso", "iso-back", "front", "back", "left", "right", "top"]),
+  scale: z.number().positive().max(1000),
+  x: num,
+  y: num,
+  showHidden: z.boolean(),
+  visible: z.array(num).max(400_000),
+  hidden: z.array(num).max(400_000),
+  bounds: z.tuple([num, num, num, num]),
+  label: z.string().max(80),
+});
+
+const dim2d = z.object({
+  id: z.string().max(40),
+  viewId: z.string().max(40),
+  a: vec2,
+  b: vec2,
+  orient: z.enum(["h", "v", "aligned"]),
+  offset: num,
+  text: z.string().max(80).nullable(),
+});
+
+export const sheetData = z.object({
+  version: z.literal(1),
+  size: z.enum(["A4", "A3", "A2", "A1"]),
+  unit: z.enum(["mm", "cm"]),
+  decimals: z.number().int().min(0).max(3),
+  dimColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  views: z.array(view).max(24),
+  dims: z.array(dim2d).max(2000),
+  texts: z.array(z.object({ id: z.string().max(40), x: num, y: num, text: z.string().max(500), size: num })).max(200),
+  title: z.object({
+    proyecto: z.string().max(120),
+    cliente: z.string().max(120),
+    plano: z.string().max(120),
+    cantidad: z.string().max(40),
+    dibujo: z.string().max(120),
+    fecha: z.string().max(40),
+    notas: z.string().max(500),
+  }),
+});
+
+export const sheetInput = z.object({ name: z.string().trim().min(1).max(120), data: sheetData });

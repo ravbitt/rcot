@@ -3,8 +3,8 @@
 #   SERVICE_URL_APP_3000        dominio público de la app (puerto interno 3000)
 #   SERVICE_USER/PASSWORD_POSTGRES  credenciales de la base
 #   SERVICE_BASE64_64_AUTHSECRET    secreto de Better Auth
-#   SERVICE_PASSWORD_ADMIN          contraseña inicial del administrador (si no defines ADMIN_PASSWORD)
-# Tú solo defines ADMIN_EMAIL en la pestaña Environment Variables de Coolify.
+# Tú defines ADMIN_EMAIL y ADMIN_PASSWORD (mín. 10 caracteres) en Environment Variables de Coolify.
+# La contraseña se aplica en cada arranque: para cambiarla, edita ADMIN_PASSWORD y redespliega.
 
 services:
   app:
@@ -20,7 +20,7 @@ services:
       DATABASE_URL: postgres://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@db:5432/cotas
       ADMIN_EMAIL: ${ADMIN_EMAIL:?}
       ADMIN_NAME: ${ADMIN_NAME:-Administrador}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-${SERVICE_PASSWORD_ADMIN}}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
     volumes:
       # Modelos subidos (STEP originales y mallas convertidas)

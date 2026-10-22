@@ -4,7 +4,7 @@ set -e
 
 node scripts/migrate.mjs
 
-# Crea el administrador si todavía no hay ninguno y están ADMIN_EMAIL y ADMIN_PASSWORD
-node scripts/create-admin.mjs --if-none
+# Crea el administrador o actualiza su contraseña desde ADMIN_EMAIL / ADMIN_PASSWORD
+node scripts/create-admin.mjs --sync
 
 exec node server.js

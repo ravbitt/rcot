@@ -50,20 +50,19 @@ Todo va en `docker-compose.yaml` (app + Postgres + volúmenes): es **un solo rec
 1. **Nuevo recurso** → desde el repositorio Git → Build Pack **Docker Compose** (archivo `docker-compose.yaml`).
 2. **Dominio**: en el servicio `app`, asigna tu dominio (p. ej. `https://cotas.tudominio.cl`). Coolify lo
    enruta al puerto interno 3000 y lo entrega a la app como `BETTER_AUTH_URL`.
-3. **Variables de entorno**: Coolify genera solas las credenciales de la base, el secreto de autenticación
-   y la contraseña inicial del administrador (`SERVICE_PASSWORD_ADMIN`, visible en *Environment Variables*).
+3. **Variables de entorno**: Coolify genera solas las credenciales de la base y el secreto de autenticación.
    Tú defines:
 
    | Variable | |
    |---|---|
    | `ADMIN_EMAIL` | **Obligatoria**: correo del administrador |
    | `ADMIN_NAME` | Opcional |
-   | `ADMIN_PASSWORD` | Opcional: si la defines, se usa en vez de la generada |
+   | `ADMIN_PASSWORD` | **Obligatoria** (mín. 10 caracteres). Se aplica en cada arranque: para cambiarla, edítala y redespliega |
    | `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` | Opcional (recomendada): `openssl rand -base64 32`. Evita errores en páginas abiertas durante un despliegue. |
    | `MAX_UPLOAD_MB` | Opcional, por defecto 100 |
 
 4. **Desplegar**. Al arrancar, la app espera a que Postgres esté sano, aplica las migraciones y crea el
-   administrador si todavía no hay ninguno. Los volúmenes `cotas-pg` (base) y `cotas-uploads` (modelos)
+   administrador (o actualiza su contraseña si cambió `ADMIN_PASSWORD`). Los volúmenes `cotas-pg` (base) y `cotas-uploads` (modelos)
    persisten entre despliegues.
 
 El healthcheck de la app es `/api/health`. Si el proxy limita el tamaño de las peticiones, súbelo para

@@ -25,7 +25,10 @@ export function LoginForm() {
     });
     setPending(false);
     if (error) {
-      setError(error.status === 429 ? "Demasiados intentos. Espera un momento." : "Correo o contraseña incorrectos.");
+      // 401 = credenciales; cualquier otro código es un problema de configuración (p. ej. origen o URL) y se muestra tal cual
+      if (error.status === 401) setError("Correo o contraseña incorrectos.");
+      else if (error.status === 429) setError("Demasiados intentos. Espera un momento.");
+      else setError(`No se pudo ingresar (${error.status}): ${error.message ?? error.statusText ?? "error desconocido"}`);
       return;
     }
     router.replace("/admin");

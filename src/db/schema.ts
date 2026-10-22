@@ -5,25 +5,43 @@ import type { DimensionAxis, SheetData, Vec3 } from "@/lib/types";
 
 const ts = () => timestamp({ withTimezone: true });
 
-/** Modelo subido. El archivo original se guarda tal cual; `meshFile` es la malla convertida que usa el visor. */
-export const model = pgTable("model", {
+/** Carpeta de un proyecto: agrupa modelos. Al borrarla, sus modelos quedan «sin carpeta». */
+export const folder = pgTable("folder", {
   id: text().primaryKey(),
   name: text().notNull(),
-  notes: text().notNull().default(""),
-  originalName: text().notNull(),
-  format: text().$type<"step" | "iges" | "stl">().notNull(),
-  file: text().notNull(),
-  meshFile: text().notNull(),
-  bytes: integer().notNull(),
-  bodyCount: integer().notNull(),
-  /** Caja envolvente en mm: [[minX, minY, minZ], [maxX, maxY, maxZ]] */
-  bbox: jsonb().$type<[Vec3, Vec3]>().notNull(),
   createdAt: ts().defaultNow().notNull(),
   updatedAt: ts()
     .defaultNow()
     .notNull()
     .$onUpdate(() => new Date()),
 });
+
+/** Modelo subido. El archivo original se guarda tal cual; `meshFile` es la malla convertida que usa el visor. */
+export const model = pgTable(
+  "model",
+  {
+    id: text().primaryKey(),
+    folderId: text().references(() => folder.id, { onDelete: "set null" }),
+    name: text().notNull(),
+    notes: text().notNull().default(""),
+    originalName: text().notNull(),
+    format: text().$type<"step" | "iges" | "stl">().notNull(),
+    file: text().notNull(),
+    meshFile: text().notNull(),
+    bytes: integer().notNull(),
+    bodyCount: integer().notNull(),
+    /** Caja envolvente en mm: [[minX, minY, minZ], [maxX, maxY, maxZ]] */
+    bbox: jsonb().$type<[Vec3, Vec3]>().notNull(),
+    /** Miniatura PNG (la genera el navegador al subir el modelo) */
+    thumbFile: text(),
+    createdAt: ts().defaultNow().notNull(),
+    updatedAt: ts()
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => [index().on(t.folderId)],
+);
 
 /** Cota 3D entre dos puntos del modelo (mm). `offset` es un punto por donde pasa la línea de cota. */
 export const dimension = pgTable(

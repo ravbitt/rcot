@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { db } from "@/db";
-import { model } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { folder, model } from "@/db/schema";
 import { ConvertError, convertModel, formatFromName } from "@/lib/convert";
 import { isAdmin } from "@/lib/dal";
 import { deleteStoredFile, MAX_UPLOAD_BYTES, saveFile } from "@/lib/storage";
@@ -21,6 +22,12 @@ export async function POST(request: Request) {
   if (!format) return Response.json({ error: "Formato no admitido. Sube STEP, IGES o STL." }, { status: 400 });
 
   const name = String(form?.get("name") ?? "").trim() || file.name.replace(/\.[^.]+$/, "");
+  // Carpeta opcional: debe existir
+  const folderId = String(form?.get("folderId") ?? "").trim() || null;
+  if (folderId) {
+    const [f] = await db.select({ id: folder.id }).from(folder).where(eq(folder.id, folderId)).limit(1);
+    if (!f) return Response.json({ error: "La carpeta no existe." }, { status: 400 });
+  }
   const data = Buffer.from(await file.arrayBuffer());
   let converted;
   try {
@@ -37,6 +44,7 @@ export async function POST(request: Request) {
     const id = nanoid(12);
     await db.insert(model).values({
       id,
+      folderId,
       name: name.slice(0, 120),
       originalName: file.name.slice(0, 200),
       format,

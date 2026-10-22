@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
-import { model, share, sheet } from "@/db/schema";
+import { folder, model, share, sheet } from "@/db/schema";
 import { requireAdmin } from "@/lib/dal";
 import { deleteStoredFile } from "@/lib/storage";
 
@@ -56,16 +56,60 @@ export async function renameModel(id: string, name: string): Promise<ActionResul
   return { ok: true };
 }
 
-/** Borra el modelo con sus cotas, planos y enlaces (en cascada) y sus archivos. */
+/** Borra el modelo con sus cotas, planos y enlaces (en cascada) y sus archivos. Vuelve a su carpeta. */
 export async function deleteModel(id: string) {
   await requireAdmin();
   const [m] = await db.delete(model).where(eq(model.id, id)).returning();
   if (m) {
     await deleteStoredFile(m.file);
     await deleteStoredFile(m.meshFile);
+    if (m.thumbFile) await deleteStoredFile(m.thumbFile);
   }
-  revalidatePath("/admin");
+  revalidatePath("/admin", "layout");
+  redirect(m?.folderId ? `/admin/carpetas/${m.folderId}` : "/admin");
+}
+
+// ── Carpetas ──────────────────────────────────────────────────────────
+
+const folderName = z.string().trim().min(1, "El nombre no puede quedar vacío").max(120);
+
+export async function createFolder(name: string): Promise<ActionResult & { id?: string }> {
+  await requireAdmin();
+  const p = folderName.safeParse(name);
+  if (!p.success) return { ok: false, error: p.error.issues[0].message };
+  const id = nanoid(12);
+  await db.insert(folder).values({ id, name: p.data });
+  revalidatePath("/admin", "layout");
+  return { ok: true, id };
+}
+
+export async function renameFolder(id: string, name: string): Promise<ActionResult> {
+  await requireAdmin();
+  const p = folderName.safeParse(name);
+  if (!p.success) return { ok: false, error: p.error.issues[0].message };
+  await db.update(folder).set({ name: p.data }).where(eq(folder.id, id));
+  revalidatePath("/admin", "layout");
+  return { ok: true };
+}
+
+/** Borra la carpeta; sus modelos no se borran: quedan «sin carpeta». */
+export async function deleteFolder(id: string) {
+  await requireAdmin();
+  await db.delete(folder).where(eq(folder.id, id));
+  revalidatePath("/admin", "layout");
   redirect("/admin");
+}
+
+/** Mueve un modelo a una carpeta (o a «sin carpeta» con null). */
+export async function moveModel(modelId: string, folderId: string | null): Promise<ActionResult> {
+  await requireAdmin();
+  if (folderId) {
+    const [f] = await db.select({ id: folder.id }).from(folder).where(eq(folder.id, folderId)).limit(1);
+    if (!f) return { ok: false, error: "La carpeta no existe" };
+  }
+  await db.update(model).set({ folderId }).where(eq(model.id, modelId));
+  revalidatePath("/admin", "layout");
+  return { ok: true };
 }
 
 export async function renameSheet(id: string, modelId: string, name: string): Promise<ActionResult> {

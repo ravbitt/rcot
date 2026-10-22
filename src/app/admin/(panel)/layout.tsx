@@ -16,7 +16,7 @@ export default async function PanelLayout({ children }: LayoutProps<"/admin">) {
         </Link>
         <nav className="text-sm text-muted-foreground">
           <Link href="/admin" className="hover:text-foreground">
-            Modelos
+            Proyectos
           </Link>
         </nav>
         <div className="ml-auto flex items-center gap-3 text-sm text-muted-foreground">

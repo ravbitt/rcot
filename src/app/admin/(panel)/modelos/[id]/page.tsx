@@ -5,6 +5,7 @@ import { ModelWorkspace } from "@/components/admin/model-workspace";
 import { db } from "@/db";
 import { dimension, model, share, sheet } from "@/db/schema";
 import { requireAdmin } from "@/lib/dal";
+import { folderOptions } from "@/lib/queries";
 
 /** ¿Ya pasó la fecha? (vencimiento de un enlace) */
 const isPast = (d: Date | null) => !!d && d.getTime() < Date.now();
@@ -20,7 +21,7 @@ export default async function ModelPage({ params }: PageProps<"/admin/modelos/[i
   const { id } = await params;
   const [m] = await db.select().from(model).where(eq(model.id, id)).limit(1);
   if (!m) notFound();
-  const [dims, sheets, shares] = await Promise.all([
+  const [dims, sheets, shares, folders] = await Promise.all([
     db.select().from(dimension).where(eq(dimension.modelId, id)).orderBy(asc(dimension.createdAt)),
     db
       .select({ id: sheet.id, name: sheet.name, data: sheet.data, updatedAt: sheet.updatedAt })
@@ -28,10 +29,12 @@ export default async function ModelPage({ params }: PageProps<"/admin/modelos/[i
       .where(eq(sheet.modelId, id))
       .orderBy(asc(sheet.position), asc(sheet.createdAt)),
     db.select().from(share).where(eq(share.modelId, id)).orderBy(desc(share.createdAt)),
+    folderOptions(),
   ]);
   return (
     <ModelWorkspace
-      model={{ id: m.id, name: m.name, bodyCount: m.bodyCount, bbox: m.bbox, originalName: m.originalName, format: m.format }}
+      model={{ id: m.id, name: m.name, bodyCount: m.bodyCount, bbox: m.bbox, originalName: m.originalName, format: m.format, folderId: m.folderId }}
+      folders={folders}
       dimensions={dims.map((d) => ({ id: d.id, a: d.a, b: d.b, offset: d.offset, axis: d.axis, label: d.label }))}
       sheets={sheets.map((s) => ({ id: s.id, name: s.name, data: s.data, updatedAt: s.updatedAt.toISOString() }))}
       shares={shares.map((s) => ({

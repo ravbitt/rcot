@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Box, Copy, Download, Eye, EyeOff, FileText, Link2, Maximize, Palette, Plus, Ruler, Trash2, X } from "lucide-react";
+import { Box, ChevronRight, Copy, Download, Eye, EyeOff, FileText, Folder, Link2, Maximize, Palette, Plus, Ruler, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { SheetSvg } from "@/components/sheet/sheet-svg";
 import {
@@ -22,19 +22,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ModelViewer } from "@/components/viewer/model-viewer";
 import { PiecesList } from "@/components/viewer/pieces-list";
 import { groupPieces, type PieceGroup } from "@/lib/geometry/pieces";
 import { useUnit } from "@/hooks/use-unit";
-import { createShare, deleteModel, renameModel, revokeShare } from "@/lib/actions";
+import { createShare, deleteModel, moveModel, renameModel, revokeShare } from "@/lib/actions";
 import { dim3d, formatLength } from "@/lib/geometry/dim";
 import type { MeasureDraft, ViewerCore } from "@/lib/viewer/core";
 import type { Dimension, DimensionAxis, SheetData, Vec3 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type ModelInfo = { id: string; name: string; bodyCount: number; bbox: [Vec3, Vec3]; originalName: string; format: string };
+type ModelInfo = { id: string; name: string; bodyCount: number; bbox: [Vec3, Vec3]; originalName: string; format: string; folderId: string | null };
 type SheetRow = { id: string; name: string; data: SheetData; updatedAt: string };
 type ShareRow = {
   id: string;
@@ -52,12 +53,13 @@ type ShareRow = {
 
 type Tab = "cotas" | "planos" | "compartir";
 
-export function ModelWorkspace(props: { model: ModelInfo; dimensions: Dimension[]; sheets: SheetRow[]; shares: ShareRow[] }) {
+export function ModelWorkspace(props: { model: ModelInfo; folders: { id: string; name: string }[]; dimensions: Dimension[]; sheets: SheetRow[]; shares: ShareRow[] }) {
   const { model } = props;
   const [tab, setTab] = useState<Tab>("cotas");
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2">
+        <FolderCrumb model={model} folders={props.folders} />
         <ModelTitle model={model} />
         <ToggleGroup type="single" value={tab} onValueChange={(v) => v && setTab(v as Tab)} variant="outline" size="sm">
           <ToggleGroupItem value="cotas">
@@ -82,6 +84,46 @@ export function ModelWorkspace(props: { model: ModelInfo; dimensions: Dimension[
       {tab === "cotas" && <DimensionsTab model={model} initial={props.dimensions} />}
       {tab === "planos" && <SheetsTab modelId={model.id} sheets={props.sheets} />}
       {tab === "compartir" && <SharesTab modelId={model.id} shares={props.shares} />}
+    </div>
+  );
+}
+
+/** Carpeta del modelo: enlace para volver y selector para moverlo. */
+function FolderCrumb({ model, folders }: { model: ModelInfo; folders: { id: string; name: string }[] }) {
+  const router = useRouter();
+  const [value, setValue] = useState(model.folderId ?? "none");
+  const [, start] = useTransition();
+  const current = folders.find((f) => f.id === value);
+  return (
+    <div className="flex items-center gap-1 text-sm text-muted-foreground">
+      <Link href={current ? `/admin/carpetas/${current.id}` : "/admin"} className="hover:text-foreground" title="Volver">
+        <Folder className="size-4" />
+      </Link>
+      <Select
+        value={value}
+        onValueChange={(v) => {
+          setValue(v);
+          start(async () => {
+            const r = await moveModel(model.id, v === "none" ? null : v);
+            if (!r.ok) return void toast.error(r.error);
+            toast.success("Carpeta actualizada");
+            router.refresh();
+          });
+        }}
+      >
+        <SelectTrigger size="sm" className="h-7 max-w-44 border-none px-1.5 shadow-none" aria-label="Carpeta">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">Sin carpeta</SelectItem>
+          {folders.map((f) => (
+            <SelectItem key={f.id} value={f.id}>
+              {f.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <ChevronRight className="size-3" />
     </div>
   );
 }

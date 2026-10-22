@@ -7,7 +7,7 @@ export const UPLOAD_DIR = path.resolve(/*turbopackIgnore: true*/ process.env.UPL
 export const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB ?? 100) * 1024 * 1024;
 
 // Solo nombres generados por nosotros: evita leer o borrar fuera de la carpeta
-const FILE_RE = /^[0-9a-f-]{36}\.(step|iges|stl|mesh\.json\.gz)$/;
+const FILE_RE = /^[0-9a-f-]{36}\.(step|iges|stl|mesh\.json\.gz|thumb\.png)$/;
 
 export async function saveFile(data: Buffer | Uint8Array, ext: string) {
   await mkdir(UPLOAD_DIR, { recursive: true });

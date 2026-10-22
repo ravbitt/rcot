@@ -20,6 +20,8 @@ ENV SOURCE_COMMIT=${SOURCE_COMMIT}
 # abiertas durante un despliegue fallan con «Failed to find Server Action». Definirla en Coolify como variable de build.
 ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
 COPY . .
+# public/ puede no existir en el repo (Git no guarda carpetas vacías)
+RUN mkdir -p public
 RUN if [ -z "$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY" ]; then unset NEXT_SERVER_ACTIONS_ENCRYPTION_KEY; fi && pnpm build
 # Scripts de mantenimiento empaquetados (la imagen final no tiene tsx ni dependencias de desarrollo)
 RUN pnpm exec esbuild scripts/migrate.ts scripts/create-admin.ts \

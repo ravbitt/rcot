@@ -8,6 +8,7 @@
 
 import * as THREE from "three";
 import { bodyEdges, dot, type Body, type Edge } from "@/lib/geometry/mesh";
+import { cleanSegments } from "@/lib/drawing/segments";
 import type { Vec3, ViewKind } from "@/lib/types";
 
 export type Projection = {
@@ -140,18 +141,11 @@ export function projectView(bodies: Body[], kind: ViewKind, opts: { maxPixels?: 
   // Tramos de menos de MIN_RUN muestras se consideran ruido y toman el valor del tramo vecino
   const MIN_RUN = 3;
 
-  const visible: number[] = [];
-  const hidden: number[] = [];
-  const seen = new Set<string>();
-  const push = (out: number[], a: [number, number], b: [number, number]) => {
-    if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 0.05) return;
-    const r = (x: number) => Math.round(x * 100) / 100;
-    const s = [r(a[0]), r(a[1]), r(b[0]), r(b[1])];
-    const k1 = s.join(",");
-    const k2 = [s[2], s[3], s[0], s[1]].join(",");
-    if (seen.has(k1) || seen.has(k2)) return;
-    seen.add(k1);
-    out.push(...s);
+  // Segmentos crudos; al final se limpian (lo visible manda sobre lo oculto que cae encima)
+  const visRaw: [number, number, number, number][] = [];
+  const hidRaw: [number, number, number, number][] = [];
+  const push = (out: [number, number, number, number][], a: [number, number], b: [number, number]) => {
+    if (Math.hypot(b[0] - a[0], b[1] - a[1]) >= 0.05) out.push([a[0], a[1], b[0], b[1]]);
   };
 
   const A = new THREE.Vector3(), B = new THREE.Vector3(), Pt = new THREE.Vector3();
@@ -201,12 +195,71 @@ export function projectView(bodies: Body[], kind: ViewKind, opts: { maxPixels?: 
         const r = merged[k];
         const t0 = k === 0 ? 0 : (r.s - 0.5) / n;
         const t1 = k === merged.length - 1 ? 1 : (r.e + 0.5) / n;
-        push(r.v ? visible : hidden, at(t0), at(t1));
+        push(r.v ? visRaw : hidRaw, at(t0), at(t1));
       }
     }
   }
 
-  return { visible, hidden, bounds: [minU, minV, maxU, maxV] };
+  const clean = cleanSegments(visRaw, hidRaw);
+  return { visible: clean.visible.flat(), hidden: clean.hidden.flat(), bounds: [minU, minV, maxU, maxV] };
+}
+
+/**
+ * Relleno de la vista con el color de cada pieza: PNG transparente que cubre exactamente `bounds`
+ * (mismo encuadre que las líneas), con un sombreado suave para distinguir las caras.
+ */
+export function renderFill(
+  bodies: Body[],
+  kind: ViewKind,
+  bounds: [number, number, number, number],
+  colors: string[],
+  pxPerMm: number,
+): string {
+  const { u, v, d } = viewBasis(kind);
+  const [minU, minV, maxU, maxV] = bounds;
+  const W = Math.max(16, Math.min(3000, Math.round((maxU - minU) * pxPerMm)));
+  const H = Math.max(16, Math.min(3000, Math.round((maxV - minV) * pxPerMm)));
+  let minD = Infinity, maxD = -Infinity;
+  const tmp = new THREE.Vector3();
+  for (const b of bodies) {
+    for (let i = 0; i < b.positions.length; i += 3) {
+      const pd = tmp.set(b.positions[i], b.positions[i + 1], b.positions[i + 2]).dot(d);
+      minD = Math.min(minD, pd);
+      maxD = Math.max(maxD, pd);
+    }
+  }
+  const camera = new THREE.OrthographicCamera(minU, maxU, maxV, minV, 1, maxD - minD + 2);
+  camera.position.copy(d.clone().multiplyScalar(minD - 1));
+  camera.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(u, v, d.clone().negate()));
+  camera.updateMatrixWorld(true);
+  camera.updateProjectionMatrix();
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(1);
+  renderer.setSize(W, H, false);
+  renderer.setClearColor(0x000000, 0);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.AmbientLight(0xffffff, 1.9));
+  const light = new THREE.DirectionalLight(0xffffff, 1.1);
+  // luz desde arriba a la izquierda de la cámara
+  light.position.copy(d.clone().negate().add(v.clone().multiplyScalar(0.8)).add(u.clone().multiplyScalar(-0.5)));
+  scene.add(light);
+  const disposables: { dispose: () => void }[] = [];
+  bodies.forEach((b, i) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(b.positions, 3));
+    g.setIndex(new THREE.BufferAttribute(b.indices, 1));
+    g.computeVertexNormals();
+    const m = new THREE.MeshLambertMaterial({ color: colors[i] ?? "#cccccc", side: THREE.DoubleSide, flatShading: true });
+    disposables.push(g, m);
+    scene.add(new THREE.Mesh(g, m));
+  });
+  renderer.render(scene, camera);
+  const url = renderer.domElement.toDataURL("image/png");
+  disposables.forEach((x) => x.dispose());
+  renderer.dispose();
+  renderer.forceContextLoss();
+  return url;
 }
 
 /** Puntos «imán» de una vista: extremos de los segmentos visibles y ocultos (sin repetir). */

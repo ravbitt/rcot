@@ -171,6 +171,7 @@ export class ViewerCore {
       g.computeBoundingSphere();
       const mesh = new THREE.Mesh(g, mat);
       mesh.name = body.name;
+      mesh.userData.woodMaterial = mat;
       this.model.add(mesh);
       this.meshes.push(mesh);
 
@@ -194,6 +195,25 @@ export class ViewerCore {
     const box = new THREE.Box3().setFromObject(this.model);
     this.size = box.getSize(new THREE.Vector3()).length() || 1000;
     this.fit();
+  }
+
+  /** Colorea cada pieza (en el orden de los cuerpos) o vuelve al color madera con `null`. */
+  setBodyColors(colors: string[] | null) {
+    this.meshes.forEach((m, i) => {
+      const shared = m.userData.woodMaterial as THREE.Material;
+      if (m.material !== shared) (m.material as THREE.Material).dispose();
+      m.material = colors?.[i]
+        ? new THREE.MeshStandardMaterial({
+            color: colors[i],
+            roughness: 0.75,
+            metalness: 0,
+            polygonOffset: true,
+            polygonOffsetFactor: 1,
+            polygonOffsetUnits: 1,
+            side: THREE.DoubleSide,
+          })
+        : shared;
+    });
   }
 
   setHiddenBodies(hidden: Set<string>) {

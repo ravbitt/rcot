@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { Box, Copy, Download, Eye, EyeOff, FileText, Link2, Maximize, Plus, Ruler, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Box, Copy, Download, Eye, EyeOff, FileText, Link2, Maximize, Palette, Plus, Ruler, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { SheetSvg } from "@/components/sheet/sheet-svg";
 import {
@@ -25,6 +25,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ModelViewer } from "@/components/viewer/model-viewer";
+import { PiecesList } from "@/components/viewer/pieces-list";
+import { groupPieces, type PieceGroup } from "@/lib/geometry/pieces";
 import { useUnit } from "@/hooks/use-unit";
 import { createShare, deleteModel, renameModel, revokeShare } from "@/lib/actions";
 import { dim3d, formatLength } from "@/lib/geometry/dim";
@@ -144,6 +146,9 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
   const [draft, setDraft] = useState<MeasureDraft>({ a: null, b: null });
   const [bodies, setBodies] = useState<string[]>([]);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [pieces, setPieces] = useState<{ groups: PieceGroup[]; bodyGroup: number[] } | null>(null);
+  const [colored, setColored] = useState(false);
+  const bodyColors = useMemo(() => (colored && pieces ? pieces.bodyGroup.map((g) => pieces.groups[g].color) : null), [colored, pieces]);
   const core = useRef<ViewerCore | null>(null);
   const decimals = unit === "cm" ? 1 : 0;
 
@@ -211,7 +216,11 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
           onSelect={setSelected}
           onCreate={create}
           onDraftChange={setDraft}
-          onLoaded={({ bodies }) => setBodies(bodies.map((b) => b.name))}
+          onLoaded={({ bodies }) => {
+            setBodies(bodies.map((b) => b.name));
+            setPieces(groupPieces(bodies));
+          }}
+          bodyColors={bodyColors}
           onCore={(c) => (core.current = c)}
         />
         <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
@@ -230,6 +239,9 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
               <ToggleGroupItem value="cm">cm</ToggleGroupItem>
               <ToggleGroupItem value="mm">mm</ToggleGroupItem>
             </ToggleGroup>
+            <Button size="icon-sm" variant={colored ? "default" : "ghost"} onClick={() => setColored((c) => !c)} title="Colorear piezas">
+              <Palette />
+            </Button>
             <Button size="icon-sm" variant="ghost" onClick={() => setShowDims((s) => !s)} title={showDims ? "Ocultar cotas" : "Mostrar cotas"}>
               {showDims ? <Eye /> : <EyeOff />}
             </Button>
@@ -285,6 +297,14 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
             })}
           </ul>
         </div>
+        {pieces && (
+          <details className="border-t" open={colored}>
+            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">Despiece ({pieces.groups.length} tipos)</summary>
+            <div className="max-h-72 overflow-y-auto pb-2">
+              <PiecesList groups={pieces.groups} unit={unit} decimals={decimals} />
+            </div>
+          </details>
+        )}
         <details className="border-t">
           <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">Piezas ({bodies.length})</summary>
           <div className="flex gap-2 px-3 pb-2">

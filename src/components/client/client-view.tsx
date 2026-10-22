@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
-import { Eye, EyeOff, FileText, Maximize, Ruler } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Eye, EyeOff, FileText, Maximize, Palette, Ruler } from "lucide-react";
 import { SheetSvg } from "@/components/sheet/sheet-svg";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ModelViewer } from "@/components/viewer/model-viewer";
+import { PiecesList } from "@/components/viewer/pieces-list";
+import { groupPieces, type PieceGroup } from "@/lib/geometry/pieces";
 import { useUnit } from "@/hooks/use-unit";
 import { dim3d, formatLength } from "@/lib/geometry/dim";
 import type { ViewerCore } from "@/lib/viewer/core";
@@ -26,6 +28,9 @@ export function ClientView({ token, model, dimensions, sheets }: Props) {
   const [unit, setUnit] = useUnit();
   const [selected, setSelected] = useState<string | null>(null);
   const [showDims, setShowDims] = useState(true);
+  const [pieces, setPieces] = useState<{ groups: PieceGroup[]; bodyGroup: number[] } | null>(null);
+  const [colored, setColored] = useState(false);
+  const bodyColors = useMemo(() => (colored && pieces ? pieces.bodyGroup.map((g) => pieces.groups[g].color) : null), [colored, pieces]);
   const core = useRef<ViewerCore | null>(null);
   const decimals = unit === "cm" ? 1 : 0;
   const [min, max] = model.bbox;
@@ -67,9 +72,14 @@ export function ClientView({ token, model, dimensions, sheets }: Props) {
               selectedId={selected}
               showDimensions={showDims}
               onSelect={setSelected}
+              bodyColors={bodyColors}
+              onLoaded={({ bodies }) => setPieces(groupPieces(bodies))}
               onCore={(c) => (core.current = c)}
             />
             <div className="absolute top-4 right-4 flex gap-1 rounded-lg border bg-background/95 p-1 shadow-sm">
+              <Button size="icon-sm" variant={colored ? "default" : "ghost"} onClick={() => setColored((c) => !c)} title="Colorear piezas">
+                <Palette />
+              </Button>
               <Button size="icon-sm" variant="ghost" onClick={() => setShowDims((s) => !s)} title={showDims ? "Ocultar cotas" : "Mostrar cotas"}>
                 {showDims ? <Eye /> : <EyeOff />}
               </Button>
@@ -81,9 +91,17 @@ export function ClientView({ token, model, dimensions, sheets }: Props) {
               Arrastra para girar · rueda para acercar · clic derecho para desplazar
             </p>
           </div>
-          {dimensions.length > 0 && (
-            <aside className="max-h-[40svh] shrink-0 overflow-y-auto border-t md:max-h-none md:w-72 md:border-t-0 md:border-l">
-              <h2 className="border-b p-3 text-sm font-semibold">Medidas</h2>
+          {(dimensions.length > 0 || pieces) && (
+            <aside className="max-h-[40svh] shrink-0 overflow-y-auto border-t md:max-h-none md:w-80 md:border-t-0 md:border-l">
+              {pieces && colored && (
+                <>
+                  <h2 className="border-b p-3 text-sm font-semibold">Despiece</h2>
+                  <div className="border-b pb-2">
+                    <PiecesList groups={pieces.groups} unit={unit} decimals={decimals} />
+                  </div>
+                </>
+              )}
+              {dimensions.length > 0 && <h2 className="border-b p-3 text-sm font-semibold">Medidas</h2>}
               <ul className="divide-y text-sm">
                 {dimensions.map((d) => {
                   const g = dim3d(d.a, d.b, d.offset, d.axis);

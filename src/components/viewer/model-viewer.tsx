@@ -16,6 +16,8 @@ export type ModelViewerProps = {
   selectedId?: string | null;
   hiddenBodies?: Set<string>;
   showDimensions?: boolean;
+  /** Color de cada pieza (orden de los cuerpos) o null para el color madera */
+  bodyColors?: string[] | null;
   onSelect?: (id: string | null) => void;
   onCreate?: (d: Omit<Dimension, "id">) => void;
   onDraftChange?: (draft: MeasureDraft) => void;
@@ -54,6 +56,7 @@ export function ModelViewer(props: ModelViewerProps) {
         c.setModel(bodies);
         c.setFormat(cb.current.unit, cb.current.decimals);
         c.setDimensions(cb.current.dimensions);
+        c.setBodyColors(cb.current.bodyColors ?? null);
         setStatus("ready");
         cb.current.onLoaded?.({ bodies, data });
       })
@@ -77,6 +80,7 @@ export function ModelViewer(props: ModelViewerProps) {
   useEffect(() => core.current?.setMeasuring(!!props.measuring, props.axis ?? "aligned"), [props.measuring, props.axis]);
   useEffect(() => core.current?.setHiddenBodies(props.hiddenBodies ?? new Set()), [props.hiddenBodies]);
   useEffect(() => core.current?.setDimensionsVisible(props.showDimensions ?? true), [props.showDimensions]);
+  useEffect(() => core.current?.setBodyColors(props.bodyColors ?? null), [props.bodyColors]);
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-lg bg-[#f3f4f6]">

@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Loader2, Maximize, MousePointer2, Plus, Printer, RefreshCw, Ruler, Trash2, Type } from "lucide-react";
+import { ArrowLeft, Loader2, Maximize, MousePointer2, Plus, Printer, RefreshCw, Ruler, Table as TableIcon, Trash2, Type } from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
-import { dimShape, SheetSvg } from "@/components/sheet/sheet-svg";
+import { dimShape, SheetSvg, tableSize } from "@/components/sheet/sheet-svg";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,16 +13,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { projectView, VIEW_DIRS, viewSnapPoints } from "@/lib/drawing/project";
+import { projectView, renderFill, VIEW_DIRS, viewSnapPoints } from "@/lib/drawing/project";
+import { groupPieces, toRows } from "@/lib/geometry/pieces";
 import { fitScale, MARGIN, paperToView, SCALES, sheetSize, TITLE_H, viewToPaper } from "@/lib/drawing/sheet-math";
 import { fetchMesh, type Body } from "@/lib/geometry/mesh";
-import type { SheetData, SheetDim, SheetDimOrient, SheetSize, SheetView, TitleBlock, Vec2, ViewKind } from "@/lib/types";
+import type { SheetData, SheetDim, SheetDimOrient, SheetSize, SheetStyle, SheetTable, SheetView, TitleBlock, Vec2, ViewKind } from "@/lib/types";
+import { DEFAULT_STYLE } from "@/lib/types";
 import { SHEET_SIZES } from "@/lib/types";
 
 type Tool = "select" | "dim" | "text";
 type OrientMode = "auto" | SheetDimOrient;
 type Pick = { viewId: string; p: Vec2 };
-type Drag = { kind: "view" | "text"; id: string; start: Vec2; orig: Vec2 } | { kind: "pan"; startClient: Vec2; vb: [number, number, number, number] };
+type Drag = { kind: "view" | "text" | "table"; id: string; start: Vec2; orig: Vec2 } | { kind: "pan"; startClient: Vec2; vb: [number, number, number, number] };
 
 const KIND_ORDER: ViewKind[] = ["iso", "front", "right", "left", "back", "top", "iso-back"];
 
@@ -122,15 +124,57 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
     }
   }
 
+  /** Relleno por pieza de una vista, con los mismos colores que el despiece (~10 px por mm de papel). */
+  function fillFor(b: Body[], kind: ViewKind, bounds: SheetView["bounds"], scale: number) {
+    const { groups, bodyGroup } = groupPieces(b);
+    return renderFill(b, kind, bounds, bodyGroup.map((g) => groups[g].color), 10 / scale);
+  }
+
   async function regenerate(view: SheetView) {
     try {
       const b = await ensureBodies();
       setBusy("Proyectando vista…");
       await new Promise((r) => setTimeout(r, 20));
       const proj = projectView(b, view.kind);
-      update((d) => ({ ...d, views: d.views.map((v) => (v.id === view.id ? { ...v, ...proj } : v)) }));
+      const fill = view.fill ? fillFor(b, view.kind, proj.bounds, view.scale) : view.fill;
+      update((d) => ({ ...d, views: d.views.map((v) => (v.id === view.id ? { ...v, ...proj, fill } : v)) }));
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function toggleFill(view: SheetView, on: boolean) {
+    if (!on) return setView(view.id, { fill: null });
+    try {
+      const b = await ensureBodies();
+      setBusy("Coloreando piezas…");
+      await new Promise((r) => setTimeout(r, 20));
+      setView(view.id, { fill: fillFor(b, view.kind, view.bounds, view.scale) });
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo colorear la vista");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Tabla de despiece: piezas iguales agrupadas con marca, color, cantidad y medidas. */
+  async function addTable(existing?: SheetTable) {
+    try {
+      const b = await ensureBodies();
+      const rows = toRows(groupPieces(b).groups);
+      if (existing) {
+        update((d) => ({ ...d, tables: (d.tables ?? []).map((t) => (t.id === existing.id ? { ...t, rows } : t)) }));
+        return;
+      }
+      const t: SheetTable = { id: nanoid(8), x: MARGIN + 4, y: MARGIN + 4, title: "Despiece", showColors: true, multiplier: 1, rows };
+      update((d) => ({ ...d, tables: [...(d.tables ?? []), t] }));
+      setSelected(t.id);
+      setTool("select");
+      toast.success(`Despiece con ${rows.length} tipos de pieza. Arrástralo a su lugar.`);
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo calcular el despiece");
     }
   }
 
@@ -253,7 +297,9 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
       update((d) =>
         dr.kind === "view"
           ? { ...d, views: d.views.map((v) => (v.id === dr.id ? { ...v, x: nx, y: ny } : v)) }
-          : { ...d, texts: d.texts.map((t) => (t.id === dr.id ? { ...t, x: nx, y: ny } : t)) },
+          : dr.kind === "table"
+            ? { ...d, tables: (d.tables ?? []).map((t) => (t.id === dr.id ? { ...t, x: nx, y: ny } : t)) }
+            : { ...d, texts: d.texts.map((t) => (t.id === dr.id ? { ...t, x: nx, y: ny } : t)) },
       );
       return;
     }
@@ -294,6 +340,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
       views: d.views.filter((v) => v.id !== selected),
       dims: d.dims.filter((x) => x.id !== selected && x.viewId !== selected),
       texts: d.texts.filter((t) => t.id !== selected),
+      tables: (d.tables ?? []).filter((t) => t.id !== selected),
     }));
     setSelected(null);
   }, [selected, update]);
@@ -316,6 +363,11 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
   const selView = data.views.find((v) => v.id === selected);
   const selDim = data.dims.find((d) => d.id === selected);
   const selText = data.texts.find((t) => t.id === selected);
+  const selTable = (data.tables ?? []).find((t) => t.id === selected);
+  const style = { ...DEFAULT_STYLE, ...data.style };
+  const setStyle = (k: keyof SheetStyle, v: number) => update((d) => ({ ...d, style: { ...DEFAULT_STYLE, ...d.style, [k]: v } }));
+  const setTable = (id: string, patch: Partial<SheetTable>) =>
+    update((d) => ({ ...d, tables: (d.tables ?? []).map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
   const pickView = pickA ? data.views.find((v) => v.id === pickA.viewId) : undefined;
 
   const setTitle = (k: keyof TitleBlock, v: string) => update((d) => ({ ...d, title: { ...d.title, [k]: v } }));
@@ -370,6 +422,9 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
         </Select>
         <Button size="sm" onClick={addView} disabled={!!busy}>
           <Plus /> Vista
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => addTable()} disabled={!!busy} title="Tabla con las piezas, sus medidas y colores">
+          <TableIcon /> Despiece
         </Button>
         <div className="mx-2 h-6 w-px bg-border" />
         <ToggleGroup
@@ -447,6 +502,17 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
                   }
                 : undefined
             }
+            onTablePointerDown={
+              tool === "select"
+                ? (e, t) => {
+                    e.stopPropagation();
+                    const p = toPaper(e.clientX, e.clientY);
+                    if (!p) return;
+                    setSelected(t.id);
+                    drag.current = { kind: "table", id: t.id, start: p, orig: [t.x, t.y] };
+                  }
+                : undefined
+            }
             onTextPointerDown={
               tool === "select"
                 ? (e, id) => {
@@ -519,6 +585,10 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
                 Líneas ocultas
                 <Switch checked={selView.showHidden} onCheckedChange={(c) => setView(selView.id, { showHidden: c })} />
               </label>
+              <label className="flex items-center justify-between">
+                Color por pieza
+                <Switch checked={!!selView.fill} disabled={!!busy} onCheckedChange={(c) => toggleFill(selView, c)} />
+              </label>
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => regenerate(selView)} disabled={!!busy}>
                   <RefreshCw /> Regenerar
@@ -540,6 +610,37 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
               <Button size="sm" variant="ghost" className="justify-start text-destructive" onClick={deleteSelected}>
                 <Trash2 /> Borrar cota
               </Button>
+            </section>
+          )}
+          {selTable && (
+            <section className="mb-4 grid gap-2 rounded-lg border p-3">
+              <h3 className="font-semibold">Despiece</h3>
+              <Label>Título</Label>
+              <Input value={selTable.title} onChange={(e) => setTable(selTable.id, { title: e.target.value })} />
+              <label className="flex items-center justify-between">
+                Colores de las piezas
+                <Switch checked={selTable.showColors} onCheckedChange={(c) => setTable(selTable.id, { showColors: c })} />
+              </label>
+              <Label>Módulos a fabricar (columna «Total»)</Label>
+              <Input
+                type="number"
+                min={1}
+                max={10000}
+                value={selTable.multiplier}
+                onChange={(e) => setTable(selTable.id, { multiplier: Math.max(1, Math.round(Number(e.target.value) || 1)) })}
+              />
+              <p className="text-xs text-muted-foreground">
+                {tableSize(selTable).map((v) => Math.round(v)).join(" × ")} mm · {selTable.rows.length} tipos ·{" "}
+                {selTable.rows.reduce((a, r) => a + r.qty, 0)} piezas por módulo
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => addTable(selTable)} disabled={!!busy}>
+                  <RefreshCw /> Recalcular
+                </Button>
+                <Button size="sm" variant="ghost" className="text-destructive" onClick={deleteSelected}>
+                  <Trash2 /> Quitar
+                </Button>
+              </div>
             </section>
           )}
           {selText && (
@@ -615,6 +716,36 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
                 <Label>Color cotas</Label>
                 <Input type="color" value={data.dimColor} onChange={(e) => update((d) => ({ ...d, dimColor: e.target.value }))} className="h-9 p-1" />
               </div>
+            </div>
+            <h4 className="mt-2 text-xs font-semibold text-muted-foreground uppercase">Estilo (mm de papel)</h4>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  ["dimText", "Número de cota", 0.5, 20, 0.25],
+                  ["dimLine", "Línea de cota", 0.05, 2, 0.05],
+                  ["dimArrow", "Flecha", 0.5, 15, 0.25],
+                  ["lineVisible", "Línea visible", 0.05, 2, 0.05],
+                  ["lineHidden", "Línea oculta", 0.05, 2, 0.05],
+                ] as [keyof SheetStyle, string, number, number, number][]
+              ).map(([k, l, min, max, step]) => (
+                <div key={k} className="grid gap-1">
+                  <Label>{l}</Label>
+                  <Input
+                    type="number"
+                    min={min}
+                    max={max}
+                    step={step}
+                    value={style[k]}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v)) setStyle(k, Math.min(max, Math.max(min, v)));
+                    }}
+                  />
+                </div>
+              ))}
+              <Button size="sm" variant="ghost" className="self-end" onClick={() => update((d) => ({ ...d, style: { ...DEFAULT_STYLE } }))}>
+                Restablecer
+              </Button>
             </div>
           </section>
 

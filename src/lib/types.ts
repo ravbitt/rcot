@@ -62,6 +62,8 @@ export type SheetView = {
   /** Caja de la vista en mm del modelo: [minU, minV, maxU, maxV] */
   bounds: [number, number, number, number];
   label: string;
+  /** Relleno con el color de cada pieza (PNG en data URL que cubre exactamente `bounds`), o ausente */
+  fill?: string | null;
 };
 
 export type SheetDimOrient = "h" | "v" | "aligned";
@@ -90,6 +92,32 @@ export type TitleBlock = {
   notas: string;
 };
 
+/** Grosores y tamaños de la lámina, en mm de papel. */
+export type SheetStyle = {
+  dimText: number;
+  dimLine: number;
+  dimArrow: number;
+  lineVisible: number;
+  lineHidden: number;
+};
+
+export const DEFAULT_STYLE: SheetStyle = { dimText: 3, dimLine: 0.18, dimArrow: 2.6, lineVisible: 0.35, lineHidden: 0.2 };
+
+/** Fila del despiece: un grupo de piezas iguales. Medidas en mm (largo ≥ ancho ≥ espesor). */
+export type PieceRow = { mark: string; name: string; qty: number; dims: [number, number, number]; color: string };
+
+/** Tabla de despiece sobre la hoja (esquina superior izquierda en x, y). */
+export type SheetTable = {
+  id: string;
+  x: number;
+  y: number;
+  title: string;
+  showColors: boolean;
+  /** Cantidad de módulos: multiplica la columna «Total» (1 = no se muestra) */
+  multiplier: number;
+  rows: PieceRow[];
+};
+
 export type SheetData = {
   version: 1;
   size: SheetSize;
@@ -97,9 +125,12 @@ export type SheetData = {
   unit: "mm" | "cm";
   decimals: number;
   dimColor: string;
+  /** Ausente en planos creados antes: se usa DEFAULT_STYLE */
+  style?: SheetStyle;
   views: SheetView[];
   dims: SheetDim[];
   texts: SheetText[];
+  tables?: SheetTable[];
   title: TitleBlock;
 };
 
@@ -110,9 +141,11 @@ export function emptySheet(title: Partial<TitleBlock> = {}): SheetData {
     unit: "cm",
     decimals: 1,
     dimColor: "#3f9b1c",
+    style: { ...DEFAULT_STYLE },
     views: [],
     dims: [],
     texts: [],
+    tables: [],
     title: { proyecto: "", cliente: "", plano: "", cantidad: "", dibujo: "", fecha: "", notas: "", ...title },
   };
 }

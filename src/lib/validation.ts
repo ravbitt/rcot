@@ -29,6 +29,38 @@ const view = z.object({
   hidden: z.array(num).max(400_000),
   bounds: z.tuple([num, num, num, num]),
   label: z.string().max(80),
+  fill: z
+    .string()
+    .max(6_000_000)
+    .regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/)
+    .nullable()
+    .optional(),
+});
+
+const pieceRow = z.object({
+  mark: z.string().max(8),
+  name: z.string().max(200),
+  qty: z.number().int().min(1).max(100000),
+  dims: z.tuple([num, num, num]),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+});
+
+const table = z.object({
+  id: z.string().max(40),
+  x: num,
+  y: num,
+  title: z.string().max(80),
+  showColors: z.boolean(),
+  multiplier: z.number().int().min(1).max(10000),
+  rows: z.array(pieceRow).max(500),
+});
+
+const style = z.object({
+  dimText: z.number().min(0.5).max(20),
+  dimLine: z.number().min(0.05).max(2),
+  dimArrow: z.number().min(0.5).max(15),
+  lineVisible: z.number().min(0.05).max(2),
+  lineHidden: z.number().min(0.05).max(2),
 });
 
 const dim2d = z.object({
@@ -47,6 +79,8 @@ export const sheetData = z.object({
   unit: z.enum(["mm", "cm"]),
   decimals: z.number().int().min(0).max(3),
   dimColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  style: style.optional(),
+  tables: z.array(table).max(10).optional(),
   views: z.array(view).max(24),
   dims: z.array(dim2d).max(2000),
   texts: z.array(z.object({ id: z.string().max(40), x: num, y: num, text: z.string().max(500), size: num })).max(200),

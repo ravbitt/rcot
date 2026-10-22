@@ -1,9 +1,9 @@
 # Despliegue completo (app + Postgres) para Coolify: Build Pack «Docker Compose».
 # Las variables SERVICE_* las genera Coolify en el primer despliegue y las conserva:
-#   SERVICE_URL_APP_3000        dominio público de la app (puerto interno 3000)
+#   SERVICE_URL_APP_3000        URL del dominio asignado al servicio app (puerto interno 3000)
 #   SERVICE_USER/PASSWORD_POSTGRES  credenciales de la base
 #   SERVICE_BASE64_64_AUTHSECRET    secreto de Better Auth
-# Tú defines ADMIN_EMAIL y ADMIN_PASSWORD (mín. 10 caracteres) en Environment Variables de Coolify.
+# Tú defines ADMIN_EMAIL, ADMIN_PASSWORD (mín. 10 caracteres) y APP_URL en Environment Variables de Coolify.
 # La contraseña se aplica en cada arranque: para cambiarla, edita ADMIN_PASSWORD y redespliega.
 
 services:
@@ -14,10 +14,9 @@ services:
         # Opcional (recomendado): clave fija de las Server Actions, `openssl rand -base64 32`
         NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: ${NEXT_SERVER_ACTIONS_ENCRYPTION_KEY:-}
     environment:
-      SERVICE_URL_APP_3000: ""
-      BETTER_AUTH_URL: ${SERVICE_URL_APP_3000}
-      # Acepta el dominio con https y http: un cambio de protocolo en Coolify no rompe el ingreso
-      BETTER_AUTH_TRUSTED_ORIGINS: https://${SERVICE_FQDN_APP_3000},http://${SERVICE_FQDN_APP_3000}
+      # URL pública. APP_URL (p. ej. https://rcot.ravbit.dev) tiene prioridad; si no, la que genera Coolify
+      # para el dominio del servicio (puerto interno 3000).
+      BETTER_AUTH_URL: ${APP_URL:-${SERVICE_URL_APP_3000}}
       BETTER_AUTH_SECRET: ${SERVICE_BASE64_64_AUTHSECRET}
       DATABASE_URL: postgres://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@db:5432/cotas
       ADMIN_EMAIL: ${ADMIN_EMAIL:?}

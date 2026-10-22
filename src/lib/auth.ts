@@ -43,7 +43,8 @@ function trustedOrigins(request?: Request) {
 export function createAuth({ cli = false } = {}) {
   return betterAuth({
     appName: APP_NAME,
-    baseURL: process.env.BETTER_AUTH_URL,
+    // Vacía o sin definir: Better Auth la deduce de cada petición (el ingreso igual funciona, ver trustedOrigins)
+    baseURL: process.env.BETTER_AUTH_URL || undefined,
     secret: process.env.BETTER_AUTH_SECRET,
     trustedOrigins,
     database: drizzleAdapter(db, { provider: "pg", schema: authSchema }),

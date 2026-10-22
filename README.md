@@ -56,6 +56,7 @@ Todo va en `docker-compose.yaml` (app + Postgres + volúmenes): es **un solo rec
    | Variable | |
    |---|---|
    | `ADMIN_EMAIL` | **Obligatoria**: correo del administrador |
+   | `APP_URL` | **Recomendada**: URL pública con https, p. ej. `https://rcot.ravbit.dev`. Si falta se usa la que genera Coolify para el dominio |
    | `ADMIN_NAME` | Opcional |
    | `ADMIN_PASSWORD` | **Obligatoria** (mín. 10 caracteres). Se aplica en cada arranque: para cambiarla, edítala y redespliega |
    | `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` | Opcional (recomendada): `openssl rand -base64 32`. Evita errores en páginas abiertas durante un despliegue. |

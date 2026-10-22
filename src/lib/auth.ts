@@ -11,13 +11,23 @@ const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\
 /**
  * Orígenes en los que se confía además de BETTER_AUTH_URL.
  * - BETTER_AUTH_TRUSTED_ORIGINS: lista separada por comas.
+ * - El mismo sitio: si el Origin tiene el mismo host al que llegó la petición (detrás del proxy de
+ *   Coolify: X-Forwarded-Host). Así el ingreso no depende de que BETTER_AUTH_URL tenga el protocolo
+ *   o el dominio exactos; las peticiones desde otros sitios siguen rechazándose.
  * - En desarrollo se acepta cualquier origen local, en cualquier puerto.
  */
 function trustedOrigins(request?: Request) {
   const extra = (process.env.BETTER_AUTH_TRUSTED_ORIGINS ?? "")
     .split(",")
     .map((o) => o.trim())
-    .filter(Boolean);
+    .filter((o) => /^https?:\/\/[^/]+$/.test(o));
+  const origin = request?.headers.get("origin");
+  const host = (request?.headers.get("x-forwarded-host") ?? request?.headers.get("host") ?? "").split(",")[0].trim();
+  if (origin && host) {
+    try {
+      if (new URL(origin).host === host) extra.push(origin);
+    } catch {}
+  }
   if (process.env.NODE_ENV === "development") {
     const origin = request?.headers.get("origin");
     if (origin && LOCAL_ORIGIN.test(origin)) extra.push(origin);

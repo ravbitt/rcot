@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { dim3d, formatLength } from "@/lib/geometry/dim";
+import { explodeOffsets } from "@/lib/geometry/explode";
 import { bodyEdges, type Body, type Edge } from "@/lib/geometry/mesh";
 import type { Dimension, DimensionAxis, Vec3 } from "@/lib/types";
 
@@ -47,6 +48,10 @@ export class ViewerCore {
   private dimsGroup = new THREE.Group();
   private raycaster = new THREE.Raycaster();
   private meshes: THREE.Mesh[] = [];
+  /** Malla y aristas de cada pieza (para explosionar) y los datos originales */
+  private bodyObjects: THREE.Object3D[][] = [];
+  private bodyData: Body[] = [];
+  private exploded = 0;
   private edges: { body: string; a: THREE.Vector3; b: THREE.Vector3 }[] = [];
   private vertices: { body: string; p: THREE.Vector3 }[] = [];
   private dims = new Map<string, DimVisual>();
@@ -151,6 +156,8 @@ export class ViewerCore {
   setModel(bodies: Body[]) {
     this.model.clear();
     this.meshes = [];
+    this.bodyObjects = [];
+    this.bodyData = bodies;
     this.edges = [];
     const vmap = new Map<string, { body: string; p: THREE.Vector3 }>();
     const mat = new THREE.MeshStandardMaterial({
@@ -184,6 +191,7 @@ export class ViewerCore {
       lines.name = `${body.name}:edges`;
       lines.userData.body = body.name;
       this.model.add(lines);
+      this.bodyObjects.push([mesh, lines]);
       for (const e of feat) {
         const a = v3(e.a);
         const b = v3(e.b);
@@ -214,6 +222,17 @@ export class ViewerCore {
           })
         : shared;
     });
+  }
+
+  /**
+   * Vista explosionada (0 = armado). Las piezas solo se trasladan; las cotas se ocultan porque miden
+   * el modelo armado, y el imán de medición queda fuera de uso mientras esté explosionado.
+   */
+  setExplode(factor: number) {
+    this.exploded = factor;
+    const off = explodeOffsets(this.bodyData, factor);
+    this.bodyObjects.forEach((objs, i) => objs.forEach((o) => o.position.set(...off[i])));
+    this.dimsGroup.visible = factor === 0 && this.dimsWanted;
   }
 
   setHiddenBodies(hidden: Set<string>) {
@@ -296,8 +315,10 @@ export class ViewerCore {
     }
   }
 
+  private dimsWanted = true;
   setDimensionsVisible(visible: boolean) {
-    this.dimsGroup.visible = visible;
+    this.dimsWanted = visible;
+    this.dimsGroup.visible = visible && this.exploded === 0;
   }
 
   private dimText(dim: Pick<Dimension, "label">, value: number) {
@@ -495,7 +516,7 @@ export class ViewerCore {
 
   private onPointerMove = (ev: PointerEvent) => {
     const { x, y, w, h } = this.mouse(ev);
-    if (this.measuring) {
+    if (this.measuring && this.exploded === 0) {
       if (!this.draft.a) this.showMarker(this.snapAt(x, y, w, h));
       else this.updatePreview(x, y, w, h);
       return;
@@ -520,7 +541,7 @@ export class ViewerCore {
     if (!this.downAt || Math.hypot(ev.clientX - this.downAt.x, ev.clientY - this.downAt.y) > 5 || ev.button !== 0) return;
     this.downAt = null;
     const { x, y, w, h } = this.mouse(ev);
-    if (!this.measuring) {
+    if (!this.measuring || this.exploded !== 0) {
       this.events.onSelectDimension?.(null);
       return;
     }

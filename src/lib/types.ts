@@ -64,6 +64,8 @@ export type SheetView = {
   label: string;
   /** Relleno con el color de cada pieza (PNG en data URL que cubre exactamente `bounds`), o ausente */
   fill?: string | null;
+  /** Factor de vista explosionada (0 o ausente = armado) */
+  explode?: number;
 };
 
 export type SheetDimOrient = "h" | "v" | "aligned";

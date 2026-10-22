@@ -35,6 +35,7 @@ const view = z.object({
     .regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/)
     .nullable()
     .optional(),
+  explode: z.number().min(0).max(5).optional(),
 });
 
 const pieceRow = z.object({

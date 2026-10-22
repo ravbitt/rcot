@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ModelViewer } from "@/components/viewer/model-viewer";
+import { ExplodeSlider } from "@/components/viewer/explode-slider";
 import { PiecesList } from "@/components/viewer/pieces-list";
 import { groupPieces, type PieceGroup } from "@/lib/geometry/pieces";
 import { useUnit } from "@/hooks/use-unit";
@@ -190,6 +191,7 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [pieces, setPieces] = useState<{ groups: PieceGroup[]; bodyGroup: number[] } | null>(null);
   const [colored, setColored] = useState(false);
+  const [explode, setExplode] = useState(0);
   const bodyColors = useMemo(() => (colored && pieces ? pieces.bodyGroup.map((g) => pieces.groups[g].color) : null), [colored, pieces]);
   const core = useRef<ViewerCore | null>(null);
   const decimals = unit === "cm" ? 1 : 0;
@@ -240,7 +242,7 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
     return () => window.removeEventListener("keydown", onKey);
   }, [draft.a, selected, remove]);
 
-  const step = !measuring ? null : !draft.a ? "Haz clic en el primer punto" : !draft.b ? "Haz clic en el segundo punto" : "Mueve para ubicar la cota y haz clic";
+  const step = explode > 0 ? "Vista explosionada: las cotas se ocultan (doble clic en el deslizador para armar)" : !measuring ? null : !draft.a ? "Haz clic en el primer punto" : !draft.b ? "Haz clic en el segundo punto" : "Mueve para ubicar la cota y haz clic";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -263,11 +265,20 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
             setPieces(groupPieces(bodies));
           }}
           bodyColors={bodyColors}
+          explode={explode}
           onCore={(c) => (core.current = c)}
         />
         <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
           <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-lg border bg-background/95 p-1.5 shadow-sm">
-            <Button size="sm" variant={measuring ? "default" : "outline"} onClick={() => setMeasuring((m) => !m)} title="Medir (M)">
+            <Button
+              size="sm"
+              variant={measuring ? "default" : "outline"}
+              onClick={() => {
+                setExplode(0);
+                setMeasuring((m) => !m);
+              }}
+              title="Medir (M)"
+            >
               <Ruler /> {measuring ? "Midiendo" : "Medir"}
             </Button>
             <ToggleGroup type="single" size="sm" variant="outline" value={axis} onValueChange={(v) => v && setAxis(v as DimensionAxis)}>
@@ -284,6 +295,13 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
             <Button size="icon-sm" variant={colored ? "default" : "ghost"} onClick={() => setColored((c) => !c)} title="Colorear piezas">
               <Palette />
             </Button>
+            <ExplodeSlider
+              value={explode}
+              onChange={(v) => {
+                setExplode(v);
+                if (v > 0) setMeasuring(false);
+              }}
+            />
             <Button size="icon-sm" variant="ghost" onClick={() => setShowDims((s) => !s)} title={showDims ? "Ocultar cotas" : "Mostrar cotas"}>
               {showDims ? <Eye /> : <EyeOff />}
             </Button>
@@ -295,7 +313,13 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
         {step && (
           <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center">
             <div className="rounded-full bg-black/75 px-3 py-1.5 text-xs text-white">
-              {step} · <kbd>Esc</kbd> cancela
+              {step}
+              {explode === 0 && (
+                <>
+                  {" "}
+                  · <kbd>Esc</kbd> cancela
+                </>
+              )}
             </div>
           </div>
         )}

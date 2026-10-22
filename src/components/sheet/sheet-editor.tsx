@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { projectView, renderFill, VIEW_DIRS, viewSnapPoints } from "@/lib/drawing/project";
+import { explodeBodies } from "@/lib/geometry/explode";
 import { groupPieces, toRows } from "@/lib/geometry/pieces";
 import { fitScale, MARGIN, paperToView, SCALES, sheetSize, TITLE_H, viewToPaper } from "@/lib/drawing/sheet-math";
 import { fetchMesh, type Body } from "@/lib/geometry/mesh";
@@ -124,20 +125,25 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
     }
   }
 
-  /** Relleno por pieza de una vista, con los mismos colores que el despiece (~10 px por mm de papel). */
-  function fillFor(b: Body[], kind: ViewKind, bounds: SheetView["bounds"], scale: number) {
+  /**
+   * Relleno por pieza de una vista, con los mismos colores que el despiece (~10 px por mm de papel).
+   * Los grupos se calculan sobre las piezas armadas (la explosión no cambia sus medidas).
+   */
+  function fillFor(b: Body[], kind: ViewKind, bounds: SheetView["bounds"], scale: number, explode = 0) {
     const { groups, bodyGroup } = groupPieces(b);
-    return renderFill(b, kind, bounds, bodyGroup.map((g) => groups[g].color), 10 / scale);
+    return renderFill(explodeBodies(b, explode), kind, bounds, bodyGroup.map((g) => groups[g].color), 10 / scale);
   }
 
-  async function regenerate(view: SheetView) {
+  /** Vuelve a proyectar la vista (con su explosión) y, si tenía relleno de color, también lo rehace. */
+  async function regenerate(view: SheetView, patch: Partial<SheetView> = {}) {
     try {
       const b = await ensureBodies();
       setBusy("Proyectando vista…");
       await new Promise((r) => setTimeout(r, 20));
-      const proj = projectView(b, view.kind);
-      const fill = view.fill ? fillFor(b, view.kind, proj.bounds, view.scale) : view.fill;
-      update((d) => ({ ...d, views: d.views.map((v) => (v.id === view.id ? { ...v, ...proj, fill } : v)) }));
+      const next = { ...view, ...patch };
+      const proj = projectView(explodeBodies(b, next.explode ?? 0), next.kind);
+      const fill = next.fill ? fillFor(b, next.kind, proj.bounds, next.scale, next.explode ?? 0) : next.fill;
+      update((d) => ({ ...d, views: d.views.map((v) => (v.id === view.id ? { ...next, ...proj, fill } : v)) }));
     } finally {
       setBusy(null);
     }
@@ -149,7 +155,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
       const b = await ensureBodies();
       setBusy("Coloreando piezas…");
       await new Promise((r) => setTimeout(r, 20));
-      setView(view.id, { fill: fillFor(b, view.kind, view.bounds, view.scale) });
+      setView(view.id, { fill: fillFor(b, view.kind, view.bounds, view.scale, view.explode ?? 0) });
     } catch (err) {
       console.error(err);
       toast.error("No se pudo colorear la vista");
@@ -589,6 +595,17 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
                 Color por pieza
                 <Switch checked={!!selView.fill} disabled={!!busy} onCheckedChange={(c) => toggleFill(selView, c)} />
               </label>
+              <ExplodeControl
+                key={selView.id}
+                value={selView.explode ?? 0}
+                disabled={!!busy}
+                onCommit={(v) => {
+                  const base = VIEW_DIRS[selView.kind].label;
+                  const label = v > 0 && selView.label === base ? `${base} explosionada` : v === 0 && selView.label === `${base} explosionada` ? base : selView.label;
+                  regenerate(selView, { explode: v, label });
+                  if (v > 0 && data.dims.some((d) => d.viewId === selView.id)) toast.info("Las cotas de esta vista se dibujaron sobre la vista armada: revísalas.");
+                }}
+              />
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => regenerate(selView)} disabled={!!busy}>
                   <RefreshCw /> Regenerar
@@ -779,6 +796,33 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
           )}
         </aside>
       </div>
+    </div>
+  );
+}
+
+/** Explosión de una vista: se aplica al soltar el deslizador (proyectar toma un momento). */
+function ExplodeControl({ value, disabled, onCommit }: { value: number; disabled: boolean; onCommit: (v: number) => void }) {
+  const [v, setV] = useState(value);
+  const commit = () => v !== value && onCommit(v);
+  return (
+    <div className="grid gap-1">
+      <div className="flex items-center justify-between">
+        <span>Explosionada</span>
+        <span className="font-mono text-xs text-muted-foreground">{v === 0 ? "no" : `×${v.toFixed(2)}`}</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={1.5}
+        step={0.05}
+        value={v}
+        disabled={disabled}
+        onChange={(e) => setV(Number(e.target.value))}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        className="accent-primary"
+        aria-label="Factor de explosión"
+      />
     </div>
   );
 }

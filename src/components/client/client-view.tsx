@@ -7,13 +7,13 @@ import { SheetSvg } from "@/components/sheet/sheet-svg";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ModelViewer } from "@/components/viewer/model-viewer";
+import { ExplodeSlider } from "@/components/viewer/explode-slider";
 import { PiecesList } from "@/components/viewer/pieces-list";
 import { groupPieces, type PieceGroup } from "@/lib/geometry/pieces";
 import { useUnit } from "@/hooks/use-unit";
-import { dim3d, formatLength } from "@/lib/geometry/dim";
+import { formatLength } from "@/lib/geometry/dim";
 import type { ViewerCore } from "@/lib/viewer/core";
 import type { Dimension, SheetData, Vec3 } from "@/lib/types";
-import { cn } from "@/lib/utils";
 
 type Props = {
   token: string;
@@ -30,6 +30,7 @@ export function ClientView({ token, model, dimensions, sheets }: Props) {
   const [showDims, setShowDims] = useState(true);
   const [pieces, setPieces] = useState<{ groups: PieceGroup[]; bodyGroup: number[] } | null>(null);
   const [colored, setColored] = useState(false);
+  const [explode, setExplode] = useState(0);
   const bodyColors = useMemo(() => (colored && pieces ? pieces.bodyGroup.map((g) => pieces.groups[g].color) : null), [colored, pieces]);
   const core = useRef<ViewerCore | null>(null);
   const decimals = unit === "cm" ? 1 : 0;
@@ -73,6 +74,7 @@ export function ClientView({ token, model, dimensions, sheets }: Props) {
               showDimensions={showDims}
               onSelect={setSelected}
               bodyColors={bodyColors}
+              explode={explode}
               onLoaded={({ bodies }) => setPieces(groupPieces(bodies))}
               onCore={(c) => (core.current = c)}
             />
@@ -80,6 +82,7 @@ export function ClientView({ token, model, dimensions, sheets }: Props) {
               <Button size="icon-sm" variant={colored ? "default" : "ghost"} onClick={() => setColored((c) => !c)} title="Colorear piezas">
                 <Palette />
               </Button>
+              <ExplodeSlider value={explode} onChange={setExplode} />
               <Button size="icon-sm" variant="ghost" onClick={() => setShowDims((s) => !s)} title={showDims ? "Ocultar cotas" : "Mostrar cotas"}>
                 {showDims ? <Eye /> : <EyeOff />}
               </Button>
@@ -91,34 +94,13 @@ export function ClientView({ token, model, dimensions, sheets }: Props) {
               Arrastra para girar · rueda para acercar · clic derecho para desplazar
             </p>
           </div>
-          {(dimensions.length > 0 || pieces) && (
+          {pieces && (
             <aside className="max-h-[40svh] shrink-0 overflow-y-auto border-t md:max-h-none md:w-80 md:border-t-0 md:border-l">
-              {pieces && colored && (
-                <>
-                  <h2 className="border-b p-3 text-sm font-semibold">Despiece</h2>
-                  <div className="border-b pb-2">
-                    <PiecesList groups={pieces.groups} unit={unit} decimals={decimals} />
-                  </div>
-                </>
-              )}
-              {dimensions.length > 0 && <h2 className="border-b p-3 text-sm font-semibold">Medidas</h2>}
-              <ul className="divide-y text-sm">
-                {dimensions.map((d) => {
-                  const g = dim3d(d.a, d.b, d.offset, d.axis);
-                  return (
-                    <li key={d.id}>
-                      <button
-                        type="button"
-                        className={cn("flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-muted", selected === d.id && "bg-primary/5")}
-                        onClick={() => setSelected(d.id)}
-                      >
-                        <span className="w-16 font-mono font-semibold">{g ? formatLength(g.value, unit, decimals) : "—"}</span>
-                        <span className="text-muted-foreground">{d.label ?? ""}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+              <h2 className="border-b p-3 text-sm font-semibold">Despiece</h2>
+              <div className="pb-2">
+                <PiecesList groups={pieces.groups} unit={unit} decimals={decimals} />
+              </div>
+              {!colored && <p className="border-t p-3 text-xs text-muted-foreground">Activa la paleta para ver cada pieza con su color.</p>}
             </aside>
           )}
         </div>

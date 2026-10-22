@@ -638,6 +638,23 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
                 Colores de las piezas
                 <Switch checked={selTable.showColors} onCheckedChange={(c) => setTable(selTable.id, { showColors: c })} />
               </label>
+              <div className="grid gap-1">
+                <div className="flex items-center justify-between">
+                  <Label>Tamaño</Label>
+                  <span className="font-mono text-xs text-muted-foreground">×{(selTable.scale ?? 1).toFixed(2)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={3}
+                  step={0.05}
+                  value={selTable.scale ?? 1}
+                  onChange={(e) => setTable(selTable.id, { scale: Number(e.target.value) })}
+                  onDoubleClick={() => setTable(selTable.id, { scale: 1 })}
+                  className="accent-primary"
+                  aria-label="Tamaño de la tabla"
+                />
+              </div>
               <Label>Módulos a fabricar (columna «Total»)</Label>
               <Input
                 type="number"

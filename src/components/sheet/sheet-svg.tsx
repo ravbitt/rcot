@@ -125,14 +125,17 @@ function tableColumns(t: SheetTable) {
   return cols;
 }
 
-/** Tamaño de la tabla sobre el papel: [ancho, alto] en mm. */
+/** Tamaño de la tabla sobre el papel: [ancho, alto] en mm, ya escalado. */
 export function tableSize(t: SheetTable): Vec2 {
-  return [tableColumns(t).reduce((a, c) => a + c.w, 0), T_ROW * (t.rows.length + 2)];
+  const k = t.scale ?? 1;
+  return [tableColumns(t).reduce((a, c) => a + c.w, 0) * k, T_ROW * (t.rows.length + 2) * k];
 }
 
 function PieceTable({ t, data, selected, onPointerDown }: { t: SheetTable; data: SheetData; selected: boolean; onPointerDown?: (e: React.PointerEvent) => void }) {
   const cols = tableColumns(t);
-  const [w, h] = tableSize(t);
+  // Se dibuja a tamaño 1 y se escala desde la esquina superior izquierda
+  const k = t.scale ?? 1;
+  const [w, h] = tableSize(t).map((v) => v / k);
   const fmt = (mm: number) => formatLength(mm, data.unit, data.decimals);
   const stroke = selected ? "#1c7ed6" : "black";
   // borde izquierdo de cada columna
@@ -147,7 +150,12 @@ function PieceTable({ t, data, selected, onPointerDown }: { t: SheetTable; data:
     );
   };
   return (
-    <g data-table={t.id} style={onPointerDown ? { cursor: "move" } : undefined} onPointerDown={onPointerDown}>
+    <g
+      data-table={t.id}
+      transform={k !== 1 ? `translate(${t.x} ${t.y}) scale(${k}) translate(${-t.x} ${-t.y})` : undefined}
+      style={onPointerDown ? { cursor: "move" } : undefined}
+      onPointerDown={onPointerDown}
+    >
       <rect x={t.x} y={t.y} width={w} height={h} fill="white" stroke={stroke} strokeWidth={0.35} />
       <text x={t.x + 1.2} y={t.y + T_ROW - 1.4} fontSize={T_FONT + 0.4} fontWeight={700}>
         {t.title.toUpperCase()}

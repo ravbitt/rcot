@@ -53,6 +53,7 @@ const table = z.object({
   title: z.string().max(80),
   showColors: z.boolean(),
   multiplier: z.number().int().min(1).max(10000),
+  scale: z.number().min(0.3).max(5).optional(),
   rows: z.array(pieceRow).max(500),
 });
 

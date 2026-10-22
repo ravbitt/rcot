@@ -117,6 +117,8 @@ export type SheetTable = {
   showColors: boolean;
   /** Cantidad de módulos: multiplica la columna «Total» (1 = no se muestra) */
   multiplier: number;
+  /** Tamaño de la tabla (1 = letra de 2,6 mm); ausente en tablas creadas antes */
+  scale?: number;
   rows: PieceRow[];
 };
 

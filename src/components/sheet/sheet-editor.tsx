@@ -7,6 +7,7 @@ import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { dimShape, SheetSvg, tableSize } from "@/components/sheet/sheet-svg";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,7 +18,7 @@ import { placeMarks } from "@/lib/drawing/marks";
 import { pieceAnchors, projectView, renderFill, VIEW_DIRS, viewSnapPoints } from "@/lib/drawing/project";
 import { circle3 } from "@/lib/geometry/dim";
 import { explodeBodies } from "@/lib/geometry/explode";
-import { groupPieces, toRows } from "@/lib/geometry/pieces";
+import { groupPieces, toRows, type PieceGroup } from "@/lib/geometry/pieces";
 import { fitScale, MARGIN, paperToView, SCALES, sheetSize, TITLE_H, viewToPaper } from "@/lib/drawing/sheet-math";
 import { fetchMesh, type Body } from "@/lib/geometry/mesh";
 import type { SheetData, SheetDim, SheetDimKind, SheetDimOrient, SheetMark, SheetSize, SheetStyle, SheetTable, SheetView, TitleBlock, Vec2, ViewKind } from "@/lib/types";
@@ -26,7 +27,7 @@ import { SHEET_SIZES } from "@/lib/types";
 
 type Tool = "select" | "dim" | "text";
 type OrientMode = "auto" | SheetDimOrient;
-type Pick = { viewId: string; p: Vec2 };
+type PickPoint = { viewId: string; p: Vec2 };
 type Drag = { kind: "view" | "text" | "table" | "mark"; id: string; start: Vec2; orig: Vec2 } | { kind: "pan"; startClient: Vec2; vb: [number, number, number, number] };
 
 const KIND_ORDER: ViewKind[] = ["iso", "front", "right", "left", "back", "top", "iso-back"];
@@ -48,7 +49,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
   const drag = useRef<Drag | null>(null);
   const [dimKind, setDimKind] = useState<SheetDimKind>("linear");
   // Puntos elegidos para la cota en preparación (2 para lineales, 3 para arcos, radios y ángulos)
-  const [picks, setPicks] = useState<Pick[]>([]);
+  const [picks, setPicks] = useState<PickPoint[]>([]);
   const pickA = picks[0] ?? null;
   const needed = dimKind === "linear" ? 2 : 3;
   const [hoverSnap, setHoverSnap] = useState<{ viewId: string; p: Vec2; paper: Vec2 } | null>(null);
@@ -84,6 +85,8 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
   }, [save]);
 
   const update = useCallback((fn: (d: SheetData) => SheetData) => setData((d) => fn(d)), []);
+  // Grupos del despiece (todas las piezas del modelo): para elegir qué piezas dibuja cada vista
+  const allGroups = useMemo(() => (bodies ? groupPieces(bodies).groups : null), [bodies]);
 
   // ── Malla (para proyectar vistas) ──────────────────────────────────
   const ensureBodies = useCallback(async () => {
@@ -134,9 +137,11 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
    * Relleno por pieza de una vista, con los mismos colores que el despiece (~10 px por mm de papel).
    * Los grupos se calculan sobre las piezas armadas (la explosión no cambia sus medidas).
    */
-  function fillFor(b: Body[], kind: ViewKind, bounds: SheetView["bounds"], scale: number, explode = 0) {
+  function fillFor(b: Body[], view: Pick<SheetView, "kind" | "bounds" | "scale" | "explode" | "bodies">) {
     const { groups, bodyGroup } = groupPieces(b);
-    return renderFill(explodeBodies(b, explode), kind, bounds, bodyGroup.map((g) => groups[g].color), 10 / scale);
+    const sub = viewSubset(b, view);
+    const colors = sub.idx.map((i) => groups[bodyGroup[i]].color);
+    return renderFill(explodeBodies(sub.bodies, view.explode ?? 0), view.kind, view.bounds, colors, 10 / view.scale);
   }
 
   /** Vuelve a proyectar la vista (con su explosión) y, si tenía relleno de color, también lo rehace. */
@@ -146,8 +151,8 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
       setBusy("Proyectando vista…");
       await new Promise((r) => setTimeout(r, 20));
       const next = { ...view, ...patch };
-      const proj = projectView(explodeBodies(b, next.explode ?? 0), next.kind);
-      const fill = next.fill ? fillFor(b, next.kind, proj.bounds, next.scale, next.explode ?? 0) : next.fill;
+      const proj = projectView(explodeBodies(viewSubset(b, next).bodies, next.explode ?? 0), next.kind);
+      const fill = next.fill ? fillFor(b, { ...next, bounds: proj.bounds }) : next.fill;
       // Si la vista tenía claves, se vuelven a ubicar sobre la vista nueva (mismo modo: por tipo o todas)
       const old = (data.marks ?? []).filter((m) => m.viewId === view.id);
       const marks = old.length
@@ -169,7 +174,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
       const b = await ensureBodies();
       setBusy("Coloreando piezas…");
       await new Promise((r) => setTimeout(r, 20));
-      setView(view.id, { fill: fillFor(b, view.kind, view.bounds, view.scale, view.explode ?? 0) });
+      setView(view.id, { fill: fillFor(b, view) });
     } catch (err) {
       console.error(err);
       toast.error("No se pudo colorear la vista");
@@ -184,7 +189,11 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
    */
   function computeMarks(b: Body[], view: SheetView, mode: "type" | "all", style: SheetStyle): SheetMark[] {
     const { groups, bodyGroup } = groupPieces(b);
-    const anchors = pieceAnchors(explodeBodies(b, view.explode ?? 0), view.kind);
+    // anclas solo de las piezas de la vista, devueltas en el índice de cada cuerpo
+    const sub = viewSubset(b, view);
+    const subAnchors = pieceAnchors(explodeBodies(sub.bodies, view.explode ?? 0), view.kind);
+    const anchors: ([number, number] | null)[] = b.map(() => null);
+    sub.idx.forEach((bi, k) => (anchors[bi] = subAnchors[k]));
     const [x0, y0, x1, y1] = view.bounds;
     const edgeDist = (p: Vec2) => Math.min(p[0] - x0, x1 - p[0], p[1] - y0, y1 - p[1]);
     let picked: number[];
@@ -708,6 +717,20 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
                 Color por pieza
                 <Switch checked={!!selView.fill} disabled={!!busy} onCheckedChange={(c) => toggleFill(selView, c)} />
               </label>
+              <PiecesControl
+                key={`pz-${selView.id}`}
+                view={selView}
+                groups={allGroups}
+                disabled={!!busy}
+                onOpen={() => void ensureBodies()}
+                onApply={(sel, marks) => {
+                  const base = VIEW_DIRS[selView.kind].label + ((selView.explode ?? 0) > 0 ? " explosionada" : "");
+                  const isDefault = selView.label === base || selView.label.startsWith(`${base} – `);
+                  const label = isDefault ? (sel ? `${base} – ${marks}` : base) : selView.label;
+                  regenerate(selView, { bodies: sel, label });
+                  if (data.dims.some((d) => d.viewId === selView.id)) toast.info("Las cotas de esta vista se dibujaron con las piezas anteriores: revísalas.");
+                }}
+              />
               <div className="grid gap-1 rounded-md bg-muted/50 p-2">
                 <div className="flex items-center justify-between">
                   <span>Claves de piezas</span>
@@ -1003,6 +1026,140 @@ function ExplodeControl({ value, disabled, onCommit }: { value: number; disabled
       />
     </div>
   );
+}
+
+/**
+ * Piezas que dibuja una vista: se eligen por tipo del despiece; «una sola de cada tipo» toma una pieza
+ * por tipo (para dibujar en detalle una pieza curva, por ejemplo).
+ */
+function PiecesControl({
+  view,
+  groups,
+  disabled,
+  onOpen,
+  onApply,
+}: {
+  view: SheetView;
+  groups: PieceGroup[] | null;
+  disabled: boolean;
+  onOpen: () => void;
+  onApply: (bodies: number[] | null, marks: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [oneEach, setOneEach] = useState(false);
+  const current = view.bodies?.length ? view.bodies : null;
+  const currentMarks = current && groups ? groups.filter((g) => g.bodies.some((i) => current.includes(i))).map((g) => g.mark) : [];
+
+  function start() {
+    onOpen();
+    setOpen(true);
+  }
+  // Al tener los grupos, la selección parte de lo que dibuja la vista
+  useEffect(() => {
+    if (!open || !groups) return;
+    const inView = current ? groups.filter((g) => g.bodies.some((i) => current.includes(i))) : groups;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- selección inicial del diálogo
+    setSel(new Set(inView.map((g) => g.mark)));
+    setOneEach(!!current && inView.every((g) => g.bodies.filter((i) => current.includes(i)).length === 1) && inView.some((g) => g.qty > 1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, groups]);
+
+  function apply() {
+    if (!groups) return;
+    const chosen = groups.filter((g) => sel.has(g.mark));
+    if (!chosen.length) return toast.error("Elige al menos un tipo de pieza");
+    const all = chosen.length === groups.length && !oneEach;
+    const idx = chosen.flatMap((g) => (oneEach ? [g.bodies[0]] : g.bodies));
+    onApply(all ? null : idx, chosen.map((g) => g.mark).join(", "));
+    setOpen(false);
+  }
+
+  return (
+    <div className="grid gap-1 rounded-md bg-muted/50 p-2">
+      <div className="flex items-center justify-between gap-2">
+        <span>Piezas de la vista</span>
+        <span className="truncate text-xs text-muted-foreground">{current ? `${current.length} · ${currentMarks.join(", ") || "…"}` : "todas"}</span>
+      </div>
+      <div className="flex gap-1">
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button size="xs" variant="outline" disabled={disabled} onClick={start}>
+              Elegir piezas…
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[85svh] overflow-y-auto sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Piezas de la vista</DialogTitle>
+              <DialogDescription>La vista se vuelve a dibujar solo con estas piezas (con su color, explosión y claves).</DialogDescription>
+            </DialogHeader>
+            {!groups ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Cargando piezas…
+              </p>
+            ) : (
+              <>
+                <div className="flex gap-2 text-xs">
+                  <Button size="xs" variant="outline" onClick={() => setSel(new Set(groups.map((g) => g.mark)))}>
+                    Todas
+                  </Button>
+                  <Button size="xs" variant="outline" onClick={() => setSel(new Set())}>
+                    Ninguna
+                  </Button>
+                </div>
+                <ul className="divide-y rounded-md border text-sm">
+                  {groups.map((g) => (
+                    <li key={g.mark}>
+                      <label className="flex cursor-pointer items-center gap-2 px-3 py-1.5 hover:bg-muted/50">
+                        <input
+                          type="checkbox"
+                          checked={sel.has(g.mark)}
+                          onChange={(e) =>
+                            setSel((prev) => {
+                              const n = new Set(prev);
+                              if (e.target.checked) n.add(g.mark);
+                              else n.delete(g.mark);
+                              return n;
+                            })
+                          }
+                        />
+                        <span className="inline-block size-3 rounded-sm border border-black/30" style={{ background: g.color }} />
+                        <b className="w-6 font-mono">{g.mark}</b>
+                        <span className="min-w-0 flex-1 truncate">{g.name}</span>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          ×{g.qty} · {g.dims.map((d) => Math.round(d)).join("×")}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                <label className="flex items-center justify-between text-sm">
+                  Una sola de cada tipo (para piezas de detalle)
+                  <Switch checked={oneEach} onCheckedChange={setOneEach} />
+                </label>
+              </>
+            )}
+            <DialogFooter>
+              <Button onClick={apply} disabled={!groups}>
+                Aplicar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        {current && (
+          <Button size="xs" variant="ghost" disabled={disabled} onClick={() => onApply(null, "")}>
+            Volver a todas
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Piezas que dibuja una vista: las elegidas (índices de cuerpo) o todas. */
+function viewSubset(b: Body[], view: Pick<SheetView, "bodies">) {
+  const idx = view.bodies?.length ? view.bodies.filter((i) => i >= 0 && i < b.length) : b.map((_, i) => i);
+  return { idx, bodies: idx.map((i) => b[i]) };
 }
 
 function DraftDim({ view, dim, data }: { view: SheetView; dim: SheetDim; data: SheetData }) {

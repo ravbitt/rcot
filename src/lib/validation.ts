@@ -40,6 +40,7 @@ const view = z.object({
     .optional(),
   explode: z.number().min(0).max(5).optional(),
   marksColored: z.boolean().optional(),
+  bodies: z.array(z.number().int().min(0).max(100000)).max(5000).nullable().optional(),
 });
 
 const pieceRow = z.object({

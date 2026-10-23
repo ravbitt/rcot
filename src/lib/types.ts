@@ -76,6 +76,8 @@ export type SheetView = {
   explode?: number;
   /** Claves (globos) con el color de su pieza; ausente = sí */
   marksColored?: boolean;
+  /** Piezas que dibuja la vista (índices de cuerpo del modelo); ausente o vacío = todas */
+  bodies?: number[] | null;
 };
 
 /** Clave de pieza: globo con la marca del despiece que apunta a un punto visible de la pieza. */

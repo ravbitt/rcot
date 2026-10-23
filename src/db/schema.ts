@@ -1,6 +1,7 @@
 // Tablas de la aplicación: modelos 3D, cotas, planos y enlaces para clientes.
 
-import { boolean, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { boolean, check, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import type { DimensionAxis, SheetData, Vec3 } from "@/lib/types";
 
 const ts = () => timestamp({ withTimezone: true });
@@ -82,15 +83,17 @@ export const sheet = pgTable(
   (t) => [index().on(t.modelId)],
 );
 
-/** Enlace de solo lectura para un cliente. Quien tenga el token ve el modelo, sus cotas y (opcional) los planos. */
+/**
+ * Enlace de solo lectura para un cliente: de un modelo (`modelId`) o de un proyecto entero (`folderId`).
+ * Quien tenga el token ve los modelos, sus cotas y (opcional) los planos.
+ */
 export const share = pgTable(
   "share",
   {
     id: text().primaryKey(),
     token: text().notNull().unique(),
-    modelId: text()
-      .notNull()
-      .references(() => model.id, { onDelete: "cascade" }),
+    modelId: text().references(() => model.id, { onDelete: "cascade" }),
+    folderId: text().references(() => folder.id, { onDelete: "cascade" }),
     label: text().notNull().default(""),
     showSheets: boolean().notNull().default(true),
     expiresAt: ts(),
@@ -99,5 +102,5 @@ export const share = pgTable(
     lastViewedAt: ts(),
     createdAt: ts().defaultNow().notNull(),
   },
-  (t) => [index().on(t.modelId)],
+  (t) => [index().on(t.modelId), index().on(t.folderId), check("share_target", sql`num_nonnulls(model_id, folder_id) = 1`)],
 );

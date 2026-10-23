@@ -66,6 +66,19 @@ export type SheetView = {
   fill?: string | null;
   /** Factor de vista explosionada (0 o ausente = armado) */
   explode?: number;
+  /** Claves (globos) con el color de su pieza; ausente = sí */
+  marksColored?: boolean;
+};
+
+/** Clave de pieza: globo con la marca del despiece que apunta a un punto visible de la pieza. */
+export type SheetMark = {
+  id: string;
+  viewId: string;
+  mark: string;
+  color: string;
+  /** Punto de la pieza y centro del globo, en coordenadas de la vista (mm del modelo) */
+  anchor: Vec2;
+  pos: Vec2;
 };
 
 export type SheetDimOrient = "h" | "v" | "aligned";
@@ -116,9 +129,11 @@ export type SheetStyle = {
   dimArrow: number;
   lineVisible: number;
   lineHidden: number;
+  /** Altura de la letra de las claves (el globo es un poco mayor) */
+  markSize: number;
 };
 
-export const DEFAULT_STYLE: SheetStyle = { dimText: 3, dimLine: 0.18, dimArrow: 2.6, lineVisible: 0.35, lineHidden: 0.2 };
+export const DEFAULT_STYLE: SheetStyle = { dimText: 3, dimLine: 0.18, dimArrow: 2.6, lineVisible: 0.35, lineHidden: 0.2, markSize: 3.4 };
 
 /** Fila del despiece: un grupo de piezas iguales. Medidas en mm (largo ≥ ancho ≥ espesor). */
 export type PieceRow = { mark: string; name: string; qty: number; dims: [number, number, number]; color: string };
@@ -150,6 +165,7 @@ export type SheetData = {
   dims: SheetDim[];
   texts: SheetText[];
   tables?: SheetTable[];
+  marks?: SheetMark[];
   title: TitleBlock;
 };
 

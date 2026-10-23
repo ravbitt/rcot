@@ -13,7 +13,9 @@ import { deleteStoredFile } from "@/lib/storage";
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
 const shareInput = z.object({
-  modelId: z.string().min(1),
+  /** Uno de los dos: el modelo o la carpeta (proyecto) que se comparte */
+  modelId: z.string().min(1).optional(),
+  folderId: z.string().min(1).optional(),
   label: z.string().trim().max(120),
   showSheets: z.boolean(),
   expiresAt: z.string().optional().nullable(),
@@ -24,18 +26,20 @@ export async function createShare(input: z.input<typeof shareInput>): Promise<Ac
   await requireAdmin();
   const p = shareInput.safeParse(input);
   if (!p.success) return { ok: false, error: "Datos inválidos" };
+  if (!p.data.modelId === !p.data.folderId) return { ok: false, error: "Elige un modelo o una carpeta" };
   const expires = p.data.expiresAt ? new Date(`${p.data.expiresAt}T23:59:59`) : null;
   if (expires && Number.isNaN(expires.getTime())) return { ok: false, error: "Fecha inválida" };
   const token = nanoid(24);
   await db.insert(share).values({
     id: nanoid(12),
     token,
-    modelId: p.data.modelId,
+    modelId: p.data.modelId ?? null,
+    folderId: p.data.folderId ?? null,
     label: p.data.label,
     showSheets: p.data.showSheets,
     expiresAt: expires,
   });
-  revalidatePath(`/admin/modelos/${p.data.modelId}`);
+  revalidatePath(p.data.modelId ? `/admin/modelos/${p.data.modelId}` : `/admin/carpetas/${p.data.folderId}`);
   return { ok: true, token };
 }
 
@@ -43,6 +47,13 @@ export async function revokeShare(id: string, modelId: string): Promise<ActionRe
   await requireAdmin();
   await db.update(share).set({ revokedAt: new Date() }).where(and(eq(share.id, id), eq(share.modelId, modelId)));
   revalidatePath(`/admin/modelos/${modelId}`);
+  return { ok: true };
+}
+
+export async function revokeFolderShare(id: string, folderId: string): Promise<ActionResult> {
+  await requireAdmin();
+  await db.update(share).set({ revokedAt: new Date() }).where(and(eq(share.id, id), eq(share.folderId, folderId)));
+  revalidatePath(`/admin/carpetas/${folderId}`);
   return { ok: true };
 }
 

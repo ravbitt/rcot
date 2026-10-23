@@ -2,7 +2,7 @@
 
 import { angleAt, arcSweep, circle3, dim2d, formatAngle, formatLength } from "@/lib/geometry/dim";
 import { MARGIN, scaleLabel, sheetSize, TITLE_H, TITLE_W, viewRect, viewToPaper } from "@/lib/drawing/sheet-math";
-import type { SheetData, SheetDim, SheetStyle, SheetTable, SheetView, Vec2 } from "@/lib/types";
+import type { SheetData, SheetDim, SheetMark, SheetStyle, SheetTable, SheetView, Vec2 } from "@/lib/types";
 import { DEFAULT_STYLE } from "@/lib/types";
 
 export const styleOf = (data: SheetData): SheetStyle => ({ ...DEFAULT_STYLE, ...data.style });
@@ -340,6 +340,28 @@ function PieceTable({ t, data, selected, onPointerDown }: { t: SheetTable; data:
   );
 }
 
+/** Globo de clave: punto en la pieza, línea guía hasta el borde del círculo y la marca. */
+function MarkBalloon({ m, view, data, selected, onPointerDown }: { m: SheetMark; view: SheetView; data: SheetData; selected: boolean; onPointerDown?: (e: React.PointerEvent) => void }) {
+  const st = styleOf(data);
+  const A = viewToPaper(view, m.anchor), C = viewToPaper(view, m.pos);
+  const r = st.markSize * 0.95;
+  const dx = A[0] - C[0], dy = A[1] - C[1];
+  const d = Math.hypot(dx, dy) || 1;
+  const edge: Vec2 = [C[0] + (dx / d) * r, C[1] + (dy / d) * r];
+  const stroke = selected ? "#1c7ed6" : "black";
+  const colored = view.marksColored !== false;
+  return (
+    <g data-mark={m.id} style={onPointerDown ? { cursor: "move" } : undefined} onPointerDown={onPointerDown}>
+      {d > r && <line x1={A[0]} y1={A[1]} x2={edge[0]} y2={edge[1]} stroke={stroke} strokeWidth={0.2} />}
+      <circle cx={A[0]} cy={A[1]} r={0.45} fill={stroke} />
+      <circle cx={C[0]} cy={C[1]} r={r} fill={colored ? m.color : "white"} stroke={stroke} strokeWidth={0.3} />
+      <text x={C[0]} y={C[1] + st.markSize * 0.36} fontSize={st.markSize} fontWeight={700} textAnchor="middle">
+        {m.mark}
+      </text>
+    </g>
+  );
+}
+
 export type SheetSvgProps = {
   data: SheetData;
   className?: string;
@@ -352,6 +374,7 @@ export type SheetSvgProps = {
   onDimPointerDown?: (e: React.PointerEvent, dim: SheetDim) => void;
   onTextPointerDown?: (e: React.PointerEvent, id: string) => void;
   onTablePointerDown?: (e: React.PointerEvent, table: SheetTable) => void;
+  onMarkPointerDown?: (e: React.PointerEvent, mark: SheetMark) => void;
   svgProps?: React.SVGProps<SVGSVGElement>;
   children?: React.ReactNode;
 };
@@ -367,6 +390,7 @@ export function SheetSvg({
   onDimPointerDown,
   onTextPointerDown,
   onTablePointerDown,
+  onMarkPointerDown,
   svgProps,
   children,
 }: SheetSvgProps) {
@@ -386,6 +410,10 @@ export function SheetSvg({
     if (!v || !s) continue;
     const ys = [...s.lines.matchAll(/[ML][-\d.e]+ ([-\d.e]+)/g)].map((m) => Number(m[1]));
     labelY.set(v.id, Math.max(labelY.get(v.id)!, ...ys, s.text.y + 1));
+  }
+  for (const m of data.marks ?? []) {
+    const v = views.get(m.viewId);
+    if (v) labelY.set(v.id, Math.max(labelY.get(v.id)!, viewToPaper(v, m.pos)[1] + st.markSize));
   }
   return (
     <svg
@@ -491,6 +519,20 @@ export function SheetSvg({
           {t.text}
         </text>
       ))}
+
+      {(data.marks ?? []).map((m) => {
+        const view = views.get(m.viewId);
+        return view ? (
+          <MarkBalloon
+            key={m.id}
+            m={m}
+            view={view}
+            data={data}
+            selected={selected === m.id}
+            onPointerDown={onMarkPointerDown ? (e) => onMarkPointerDown(e, m) : undefined}
+          />
+        ) : null;
+      })}
 
       {(data.tables ?? []).map((t) => (
         <PieceTable

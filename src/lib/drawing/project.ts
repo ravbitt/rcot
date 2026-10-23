@@ -51,7 +51,11 @@ const DEPTH_FS = /* glsl */ `
   void main() { gl_FragColor = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0); }
 `;
 
-export function projectView(bodies: Body[], kind: ViewKind, opts: { maxPixels?: number } = {}): Projection {
+/**
+ * Mapa de profundidad del modelo visto desde `kind` con cámara ortográfica: base de la vista, cámara,
+ * caja proyectada y una consulta de profundidad mínima/máxima por vecindario. null si no hay geometría.
+ */
+function depthMap(bodies: Body[], kind: ViewKind, opts: { maxPixels?: number } = {}) {
   const { u, v, d } = viewBasis(kind);
   const dArr: Vec3 = [d.x, d.y, d.z];
 
@@ -71,7 +75,7 @@ export function projectView(bodies: Body[], kind: ViewKind, opts: { maxPixels?: 
       if (pd > maxD) maxD = pd;
     }
   }
-  if (!Number.isFinite(minU)) return { visible: [], hidden: [], bounds: [0, 0, 0, 0] };
+  if (!Number.isFinite(minU)) return null;
 
   // Cámara ortográfica alineada con la vista, con un margen
   const margin = Math.max(maxU - minU, maxV - minV) * 0.02 + 1;
@@ -136,6 +140,14 @@ export function projectView(bodies: Body[], kind: ViewKind, opts: { maxPixels?: 
     }
     return { lo, hi: Math.max(hi, lo) };
   };
+  return { u, v, d, dArr, camera, W, H, pxPerMm, near, far, neigh, bounds: [minU, minV, maxU, maxV] as [number, number, number, number] };
+}
+
+export function projectView(bodies: Body[], kind: ViewKind, opts: { maxPixels?: number } = {}): Projection {
+  const dm = depthMap(bodies, kind, opts);
+  if (!dm) return { visible: [], hidden: [], bounds: [0, 0, 0, 0] };
+  const { u, v, dArr, camera, W, H, pxPerMm, near, far, neigh } = dm;
+  const [minU, minV, maxU, maxV] = dm.bounds;
   // Tolerancia: 0,6 mm de profundidad más una fracción de la pendiente local de la superficie
   const eps = 0.6 / (far - near);
   // Tramos de menos de MIN_RUN muestras se consideran ruido y toman el valor del tramo vecino
@@ -269,4 +281,48 @@ export function viewSnapPoints(visible: number[], hidden: number[]) {
     for (let i = 0; i < arr.length; i += 2) pts.set(`${arr[i]},${arr[i + 1]}`, [arr[i], arr[i + 1]]);
   }
   return [...pts.values()];
+}
+
+/**
+ * Punto visible de cada pieza en la vista (coordenadas de la vista), o null si está totalmente tapada.
+ * Se prueban los centros de sus triángulos contra el mapa de profundidad y se elige el visible más
+ * cercano al centro (ponderado por área) de su parte visible.
+ */
+export function pieceAnchors(bodies: Body[], kind: ViewKind): ([number, number] | null)[] {
+  const dm = depthMap(bodies, kind, { maxPixels: 2000 });
+  if (!dm) return bodies.map(() => null);
+  const { u, v, camera, W, H, near, far, neigh } = dm;
+  const eps = 0.6 / (far - near);
+  const P = new THREE.Vector3(), Q = new THREE.Vector3();
+  return bodies.map((b) => {
+    const pos = b.positions, idx = b.indices;
+    const samples: { uv: [number, number]; w: number }[] = [];
+    for (let t = 0; t < idx.length; t += 3) {
+      const i0 = idx[t] * 3, i1 = idx[t + 1] * 3, i2 = idx[t + 2] * 3;
+      P.set((pos[i0] + pos[i1] + pos[i2]) / 3, (pos[i0 + 1] + pos[i1 + 1] + pos[i2 + 1]) / 3, (pos[i0 + 2] + pos[i1 + 2] + pos[i2 + 2]) / 3);
+      const ax = pos[i1] - pos[i0], ay = pos[i1 + 1] - pos[i0 + 1], az = pos[i1 + 2] - pos[i0 + 2];
+      const bx = pos[i2] - pos[i0], by = pos[i2 + 1] - pos[i0 + 1], bz = pos[i2 + 2] - pos[i0 + 2];
+      const area = Math.hypot(ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx) / 2;
+      if (area < 1e-6) continue;
+      Q.copy(P).project(camera);
+      const px = Math.floor(((Q.x + 1) / 2) * W), py = Math.floor(((Q.y + 1) / 2) * H);
+      const z = Q.z * 0.5 + 0.5;
+      const { lo, hi } = neigh(px, py);
+      if (z <= lo + eps + (hi - lo) * 0.75) samples.push({ uv: [P.dot(u), P.dot(v)], w: area });
+    }
+    if (!samples.length) return null;
+    const W_ = samples.reduce((a, s) => a + s.w, 0);
+    const cu = samples.reduce((a, s) => a + s.uv[0] * s.w, 0) / W_, cv = samples.reduce((a, s) => a + s.uv[1] * s.w, 0) / W_;
+    const big = Math.max(...samples.map((s) => s.w)) * 0.2;
+    let best = samples[0], bestD = Infinity;
+    for (const s of samples) {
+      if (s.w < big) continue;
+      const dd = Math.hypot(s.uv[0] - cu, s.uv[1] - cv);
+      if (dd < bestD) {
+        bestD = dd;
+        best = s;
+      }
+    }
+    return best.uv;
+  });
 }

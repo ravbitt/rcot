@@ -13,20 +13,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { projectView, renderFill, VIEW_DIRS, viewSnapPoints } from "@/lib/drawing/project";
+import { placeMarks } from "@/lib/drawing/marks";
+import { pieceAnchors, projectView, renderFill, VIEW_DIRS, viewSnapPoints } from "@/lib/drawing/project";
 import { circle3 } from "@/lib/geometry/dim";
 import { explodeBodies } from "@/lib/geometry/explode";
 import { groupPieces, toRows } from "@/lib/geometry/pieces";
 import { fitScale, MARGIN, paperToView, SCALES, sheetSize, TITLE_H, viewToPaper } from "@/lib/drawing/sheet-math";
 import { fetchMesh, type Body } from "@/lib/geometry/mesh";
-import type { SheetData, SheetDim, SheetDimKind, SheetDimOrient, SheetSize, SheetStyle, SheetTable, SheetView, TitleBlock, Vec2, ViewKind } from "@/lib/types";
+import type { SheetData, SheetDim, SheetDimKind, SheetDimOrient, SheetMark, SheetSize, SheetStyle, SheetTable, SheetView, TitleBlock, Vec2, ViewKind } from "@/lib/types";
 import { DEFAULT_STYLE } from "@/lib/types";
 import { SHEET_SIZES } from "@/lib/types";
 
 type Tool = "select" | "dim" | "text";
 type OrientMode = "auto" | SheetDimOrient;
 type Pick = { viewId: string; p: Vec2 };
-type Drag = { kind: "view" | "text" | "table"; id: string; start: Vec2; orig: Vec2 } | { kind: "pan"; startClient: Vec2; vb: [number, number, number, number] };
+type Drag = { kind: "view" | "text" | "table" | "mark"; id: string; start: Vec2; orig: Vec2 } | { kind: "pan"; startClient: Vec2; vb: [number, number, number, number] };
 
 const KIND_ORDER: ViewKind[] = ["iso", "front", "right", "left", "back", "top", "iso-back"];
 
@@ -147,7 +148,16 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
       const next = { ...view, ...patch };
       const proj = projectView(explodeBodies(b, next.explode ?? 0), next.kind);
       const fill = next.fill ? fillFor(b, next.kind, proj.bounds, next.scale, next.explode ?? 0) : next.fill;
-      update((d) => ({ ...d, views: d.views.map((v) => (v.id === view.id ? { ...next, ...proj, fill } : v)) }));
+      // Si la vista tenía claves, se vuelven a ubicar sobre la vista nueva (mismo modo: por tipo o todas)
+      const old = (data.marks ?? []).filter((m) => m.viewId === view.id);
+      const marks = old.length
+        ? computeMarks(b, { ...next, ...proj }, old.length > groupPieces(b).groups.length ? "all" : "type", { ...DEFAULT_STYLE, ...data.style })
+        : [];
+      update((d) => ({
+        ...d,
+        views: d.views.map((v) => (v.id === view.id ? { ...next, ...proj, fill } : v)),
+        marks: old.length ? [...(d.marks ?? []).filter((m) => m.viewId !== view.id), ...marks] : d.marks,
+      }));
     } finally {
       setBusy(null);
     }
@@ -163,6 +173,46 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
     } catch (err) {
       console.error(err);
       toast.error("No se pudo colorear la vista");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Claves de piezas de una vista: una por tipo (la pieza más cercana al borde de la vista) o en todas.
+   * Los puntos se buscan sobre la parte visible de cada pieza (con la explosión de la vista).
+   */
+  function computeMarks(b: Body[], view: SheetView, mode: "type" | "all", style: SheetStyle): SheetMark[] {
+    const { groups, bodyGroup } = groupPieces(b);
+    const anchors = pieceAnchors(explodeBodies(b, view.explode ?? 0), view.kind);
+    const [x0, y0, x1, y1] = view.bounds;
+    const edgeDist = (p: Vec2) => Math.min(p[0] - x0, x1 - p[0], p[1] - y0, y1 - p[1]);
+    let picked: number[];
+    if (mode === "all") picked = anchors.map((a, i) => (a ? i : -1)).filter((i) => i >= 0);
+    else {
+      picked = groups
+        .map((_, gi) => {
+          const cands = bodyGroup.map((g, i) => (g === gi && anchors[i] ? i : -1)).filter((i) => i >= 0);
+          return cands.sort((i, j) => edgeDist(anchors[i]!) - edgeDist(anchors[j]!))[0] ?? -1;
+        })
+        .filter((i) => i >= 0);
+    }
+    const seeds = picked.map((i) => ({ mark: groups[bodyGroup[i]].mark, color: groups[bodyGroup[i]].color, anchor: anchors[i]! }));
+    const pos = placeMarks(seeds, view.bounds, style.markSize * 0.95 * view.scale, 12 * view.scale);
+    return seeds.map((sd, k) => ({ id: nanoid(8), viewId: view.id, ...sd, pos: pos[k] }));
+  }
+
+  async function putMarks(view: SheetView, mode: "type" | "all") {
+    try {
+      const b = await ensureBodies();
+      setBusy("Ubicando claves…");
+      await new Promise((r) => setTimeout(r, 20));
+      const marks = computeMarks(b, view, mode, { ...DEFAULT_STYLE, ...data.style });
+      update((d) => ({ ...d, marks: [...(d.marks ?? []).filter((m) => m.viewId !== view.id), ...marks] }));
+      toast.success(`${marks.length} claves. Arrastra los globos para acomodarlos.`);
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudieron ubicar las claves");
     } finally {
       setBusy(null);
     }
@@ -320,6 +370,14 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
           ? { ...d, views: d.views.map((v) => (v.id === dr.id ? { ...v, x: nx, y: ny } : v)) }
           : dr.kind === "table"
             ? { ...d, tables: (d.tables ?? []).map((t) => (t.id === dr.id ? { ...t, x: nx, y: ny } : t)) }
+            : dr.kind === "mark"
+              ? {
+                  ...d,
+                  marks: (d.marks ?? []).map((m) => {
+                    const v = m.id === dr.id && d.views.find((x) => x.id === m.viewId);
+                    return v ? { ...m, pos: paperToView(v, [dr.orig[0] + paper[0] - dr.start[0], dr.orig[1] + paper[1] - dr.start[1]]) } : m;
+                  }),
+                }
             : { ...d, texts: d.texts.map((t) => (t.id === dr.id ? { ...t, x: nx, y: ny } : t)) },
       );
       return;
@@ -362,6 +420,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
       dims: d.dims.filter((x) => x.id !== selected && x.viewId !== selected),
       texts: d.texts.filter((t) => t.id !== selected),
       tables: (d.tables ?? []).filter((t) => t.id !== selected),
+      marks: (d.marks ?? []).filter((m) => m.id !== selected && m.viewId !== selected),
     }));
     setSelected(null);
   }, [selected, update]);
@@ -384,6 +443,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
   const selDim = data.dims.find((d) => d.id === selected);
   const selText = data.texts.find((t) => t.id === selected);
   const selTable = (data.tables ?? []).find((t) => t.id === selected);
+  const selMark = (data.marks ?? []).find((m) => m.id === selected);
   const style = { ...DEFAULT_STYLE, ...data.style };
   const setStyle = (k: keyof SheetStyle, v: number) => update((d) => ({ ...d, style: { ...DEFAULT_STYLE, ...d.style, [k]: v } }));
   const setTable = (id: string, patch: Partial<SheetTable>) =>
@@ -550,6 +610,18 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
                   }
                 : undefined
             }
+            onMarkPointerDown={
+              tool === "select"
+                ? (e, m) => {
+                    e.stopPropagation();
+                    const p = toPaper(e.clientX, e.clientY);
+                    const v = data.views.find((x) => x.id === m.viewId);
+                    if (!p || !v) return;
+                    setSelected(m.id);
+                    drag.current = { kind: "mark", id: m.id, start: p, orig: viewToPaper(v, m.pos) };
+                  }
+                : undefined
+            }
             onTablePointerDown={
               tool === "select"
                 ? (e, t) => {
@@ -636,6 +708,32 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
                 Color por pieza
                 <Switch checked={!!selView.fill} disabled={!!busy} onCheckedChange={(c) => toggleFill(selView, c)} />
               </label>
+              <div className="grid gap-1 rounded-md bg-muted/50 p-2">
+                <div className="flex items-center justify-between">
+                  <span>Claves de piezas</span>
+                  <span className="text-xs text-muted-foreground">{(data.marks ?? []).filter((m) => m.viewId === selView.id).length}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <Button size="xs" variant="outline" disabled={!!busy} onClick={() => putMarks(selView, "type")}>
+                    Una por tipo
+                  </Button>
+                  <Button size="xs" variant="outline" disabled={!!busy} onClick={() => putMarks(selView, "all")}>
+                    Todas
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    disabled={!(data.marks ?? []).some((m) => m.viewId === selView.id)}
+                    onClick={() => update((d) => ({ ...d, marks: (d.marks ?? []).filter((m) => m.viewId !== selView.id) }))}
+                  >
+                    Quitar
+                  </Button>
+                </div>
+                <label className="flex items-center justify-between text-xs">
+                  Globos con color
+                  <Switch checked={selView.marksColored !== false} onCheckedChange={(c) => setView(selView.id, { marksColored: c })} />
+                </label>
+              </div>
               <ExplodeControl
                 key={selView.id}
                 value={selView.explode ?? 0}
@@ -667,6 +765,15 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
               />
               <Button size="sm" variant="ghost" className="justify-start text-destructive" onClick={deleteSelected}>
                 <Trash2 /> Borrar cota
+              </Button>
+            </section>
+          )}
+          {selMark && (
+            <section className="mb-4 grid gap-2 rounded-lg border p-3">
+              <h3 className="font-semibold">Clave {selMark.mark}</h3>
+              <p className="text-xs text-muted-foreground">Arrastra el globo para moverlo; la línea sigue apuntando a la pieza.</p>
+              <Button size="sm" variant="ghost" className="justify-start text-destructive" onClick={deleteSelected}>
+                <Trash2 /> Quitar clave
               </Button>
             </section>
           )}
@@ -801,6 +908,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
                   ["dimArrow", "Flecha", 0.5, 15, 0.25],
                   ["lineVisible", "Línea visible", 0.05, 2, 0.05],
                   ["lineHidden", "Línea oculta", 0.05, 2, 0.05],
+                  ["markSize", "Clave (letra)", 1, 20, 0.25],
                 ] as [keyof SheetStyle, string, number, number, number][]
               ).map(([k, l, min, max, step]) => (
                 <div key={k} className="grid gap-1">

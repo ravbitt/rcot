@@ -36,6 +36,7 @@ const view = z.object({
     .nullable()
     .optional(),
   explode: z.number().min(0).max(5).optional(),
+  marksColored: z.boolean().optional(),
 });
 
 const pieceRow = z.object({
@@ -63,6 +64,8 @@ const style = z.object({
   dimArrow: z.number().min(0.5).max(15),
   lineVisible: z.number().min(0.05).max(2),
   lineHidden: z.number().min(0.05).max(2),
+  // ausente en planos guardados antes de las claves
+  markSize: z.number().min(1).max(20).default(3.4),
 });
 
 const dim2d = z.object({
@@ -86,6 +89,19 @@ export const sheetData = z.object({
   dimColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   style: style.optional(),
   tables: z.array(table).max(10).optional(),
+  marks: z
+    .array(
+      z.object({
+        id: z.string().max(40),
+        viewId: z.string().max(40),
+        mark: z.string().max(8),
+        color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+        anchor: vec2,
+        pos: vec2,
+      }),
+    )
+    .max(2000)
+    .optional(),
   views: z.array(view).max(24),
   dims: z.array(dim2d).max(2000),
   texts: z.array(z.object({ id: z.string().max(40), x: num, y: num, text: z.string().max(500), size: num })).max(200),

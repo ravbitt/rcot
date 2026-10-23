@@ -15,6 +15,13 @@
       "when": 1792711038160,
       "tag": "0001_tearful_longshot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792720301164,
+      "tag": "0002_burly_tomas",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, FileText, Maximize, Palette, Ruler } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, FileText, Maximize, Palette, Ruler } from "lucide-react";
 import { SheetSvg } from "@/components/sheet/sheet-svg";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -17,13 +17,16 @@ import type { Dimension, SheetData, Vec3 } from "@/lib/types";
 
 type Props = {
   token: string;
+  /** Volver al proyecto (enlace de una carpeta) */
+  backHref?: string;
+  project?: string;
   model: { id: string; name: string; bbox: [Vec3, Vec3]; notes: string };
   dimensions: Dimension[];
   sheets: { id: string; name: string; data: SheetData }[];
 };
 
 /** Vista de solo lectura para el cliente: modelo 3D con cotas y planos. */
-export function ClientView({ token, model, dimensions, sheets }: Props) {
+export function ClientView({ token, backHref, project, model, dimensions, sheets }: Props) {
   const [tab, setTab] = useState<"modelo" | "planos">("modelo");
   const [unit, setUnit] = useUnit();
   const [selected, setSelected] = useState<string | null>(null);
@@ -40,7 +43,15 @@ export function ClientView({ token, model, dimensions, sheets }: Props) {
   return (
     <div className="flex h-svh flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b px-4 py-2">
+        {backHref && (
+          <Button variant="ghost" size="icon-sm" asChild>
+            <Link href={backHref} aria-label={`Volver a ${project ?? "el proyecto"}`} title={`Volver a ${project ?? "el proyecto"}`}>
+              <ArrowLeft />
+            </Link>
+          </Button>
+        )}
         <div className="mr-2">
+          {project && <p className="text-xs text-muted-foreground">{project}</p>}
           <h1 className="font-semibold leading-tight">{model.name}</h1>
           <p className="text-xs text-muted-foreground">
             {size} {unit}

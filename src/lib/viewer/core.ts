@@ -238,9 +238,92 @@ export class ViewerCore {
   }
 
   setHiddenBodies(hidden: Set<string>) {
+    this.hidden = hidden;
     for (const o of this.model.children) {
       const name = (o.userData.body as string | undefined) ?? o.name;
       o.visible = !hidden.has(name);
+    }
+    // CSS2DRenderer no mira la visibilidad del padre: las claves de piezas ocultas se ocultan aparte
+    for (const m of this.marks) m.label.visible = !hidden.has(this.bodyData[m.body]?.name);
+  }
+
+  // ── Claves de piezas ─────────────────────────────────────────────────
+
+  private hidden = new Set<string>();
+  private marks: { body: number; label: CSS2DObject; line: THREE.LineSegments }[] = [];
+
+  /**
+   * Globos con la marca del despiece. `groups` son las marcas y colores de cada grupo y `bodyGroup` el
+   * grupo de cada cuerpo; con mode «type» se marca una pieza por grupo (la más hacia afuera del modelo).
+   * Cada globo es hijo de su pieza: se mueve con ella al explosionar. null quita las claves.
+   */
+  setPieceMarks(info: { groups: { mark: string; color: string }[]; bodyGroup: number[] } | null, mode: "type" | "all" = "type") {
+    for (const m of this.marks) {
+      m.label.removeFromParent();
+      m.label.element.remove();
+      m.line.removeFromParent();
+      m.line.geometry.dispose();
+    }
+    this.marks = [];
+    if (!info || !this.bodyData.length) return;
+    const box = new THREE.Box3();
+    for (const b of this.bodyData) for (let i = 0; i < b.positions.length; i += 3) box.expandByPoint(new THREE.Vector3(b.positions[i], b.positions[i + 1], b.positions[i + 2]));
+    const center = box.getCenter(new THREE.Vector3());
+    // punto de la superficie de cada pieza: el centro de triángulo más cercano al centro de su caja
+    const anchors = this.bodyData.map((b) => {
+      const bb = new THREE.Box3();
+      for (let i = 0; i < b.positions.length; i += 3) bb.expandByPoint(new THREE.Vector3(b.positions[i], b.positions[i + 1], b.positions[i + 2]));
+      const bc = bb.getCenter(new THREE.Vector3());
+      let best = bc.clone(), bestD = Infinity;
+      const P = b.positions, I = b.indices, q = new THREE.Vector3();
+      for (let t = 0; t < I.length; t += 3) {
+        q.set(
+          (P[I[t] * 3] + P[I[t + 1] * 3] + P[I[t + 2] * 3]) / 3,
+          (P[I[t] * 3 + 1] + P[I[t + 1] * 3 + 1] + P[I[t + 2] * 3 + 1]) / 3,
+          (P[I[t] * 3 + 2] + P[I[t + 1] * 3 + 2] + P[I[t + 2] * 3 + 2]) / 3,
+        );
+        // preferimos caras que miran hacia afuera del modelo
+        const d = q.distanceTo(bc) - q.distanceTo(center) * 0.15;
+        if (d < bestD) {
+          bestD = d;
+          best = q.clone();
+        }
+      }
+      return best;
+    });
+    let picked = this.bodyData.map((_, i) => i);
+    if (mode === "type") {
+      picked = info.groups.map((_, g) => {
+        const members = picked.filter((i) => info.bodyGroup[i] === g);
+        return members.sort((i, j) => anchors[j].distanceTo(center) - anchors[i].distanceTo(center))[0];
+      }).filter((i) => i !== undefined);
+    }
+    const reach = this.size * 0.14;
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x222222, depthTest: false, transparent: true, opacity: 0.85 });
+    for (const i of picked) {
+      const g = info.groups[info.bodyGroup[i]];
+      if (!g) continue;
+      const a = anchors[i];
+      const dir = a.clone().sub(center);
+      if (dir.lengthSq() < 1e-9) dir.set(0, 0, 1);
+      dir.normalize();
+      // un poco hacia arriba para que los globos no queden bajo el mueble
+      dir.z += 0.35;
+      dir.normalize();
+      const pos = a.clone().addScaledVector(dir, reach);
+      const el = document.createElement("div");
+      el.className = "mark-balloon";
+      el.textContent = g.mark;
+      el.style.background = g.color;
+      const label = new CSS2DObject(el);
+      label.position.copy(pos);
+      const line = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([a, pos]), lineMat);
+      line.renderOrder = 4;
+      const mesh = this.bodyObjects[i]?.[0];
+      if (!mesh) continue;
+      mesh.add(label, line);
+      label.visible = !this.hidden.has(this.bodyData[i].name);
+      this.marks.push({ body: i, label, line });
     }
   }
 

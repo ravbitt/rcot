@@ -260,3 +260,18 @@
   .print-sheet { display: block !important; }
   html, body { background: white !important; }
 }
+
+/* Claves de piezas en el visor 3D */
+.mark-balloon {
+  pointer-events: none;
+  display: flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #222;
+  border-radius: 9999px;
+  color: #111;
+  font: 700 11px/1 var(--font-geist-sans), system-ui, sans-serif;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+}

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ModelViewer } from "@/components/viewer/model-viewer";
 import { ExplodeSlider } from "@/components/viewer/explode-slider";
+import { MarksControl, type MarksMode } from "@/components/viewer/marks-control";
 import { PiecesList } from "@/components/viewer/pieces-list";
 import { groupPieces, type PieceGroup } from "@/lib/geometry/pieces";
 import { useUnit } from "@/hooks/use-unit";
@@ -34,6 +35,8 @@ export function ClientView({ token, backHref, project, model, dimensions, sheets
   const [pieces, setPieces] = useState<{ groups: PieceGroup[]; bodyGroup: number[] } | null>(null);
   const [colored, setColored] = useState(false);
   const [explode, setExplode] = useState(0);
+  const [marksMode, setMarksMode] = useState<MarksMode>(null);
+  const pieceMarks = useMemo(() => (marksMode && pieces ? { groups: pieces.groups, bodyGroup: pieces.bodyGroup, mode: marksMode } : null), [marksMode, pieces]);
   const bodyColors = useMemo(() => (colored && pieces ? pieces.bodyGroup.map((g) => pieces.groups[g].color) : null), [colored, pieces]);
   const core = useRef<ViewerCore | null>(null);
   const decimals = unit === "cm" ? 1 : 0;
@@ -86,6 +89,7 @@ export function ClientView({ token, backHref, project, model, dimensions, sheets
               onSelect={setSelected}
               bodyColors={bodyColors}
               explode={explode}
+          pieceMarks={pieceMarks}
               onLoaded={({ bodies }) => setPieces(groupPieces(bodies))}
               onCore={(c) => (core.current = c)}
             />
@@ -93,6 +97,7 @@ export function ClientView({ token, backHref, project, model, dimensions, sheets
               <Button size="icon-sm" variant={colored ? "default" : "ghost"} onClick={() => setColored((c) => !c)} title="Colorear piezas">
                 <Palette />
               </Button>
+              <MarksControl value={marksMode} onChange={setMarksMode} />
               <ExplodeSlider value={explode} onChange={setExplode} />
               <Button size="icon-sm" variant="ghost" onClick={() => setShowDims((s) => !s)} title={showDims ? "Ocultar cotas" : "Mostrar cotas"}>
                 {showDims ? <Eye /> : <EyeOff />}

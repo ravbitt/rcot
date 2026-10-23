@@ -22,6 +22,8 @@ export type ModelViewerProps = {
   bodyColors?: string[] | null;
   /** Factor de explosión (0 = armado) */
   explode?: number;
+  /** Claves de piezas: grupos del despiece y modo (una por tipo o todas), o null */
+  pieceMarks?: { groups: { mark: string; color: string }[]; bodyGroup: number[]; mode: "type" | "all" } | null;
   onSelect?: (id: string | null) => void;
   onCreate?: (d: Omit<Dimension, "id">) => void;
   onDraftChange?: (draft: MeasureDraft) => void;
@@ -62,6 +64,8 @@ export function ModelViewer(props: ModelViewerProps) {
         c.setDimensions(cb.current.dimensions);
         c.setBodyColors(cb.current.bodyColors ?? null);
         c.setExplode(cb.current.explode ?? 0);
+        const pm = cb.current.pieceMarks;
+        if (pm) c.setPieceMarks(pm, pm.mode);
         setStatus("ready");
         cb.current.onLoaded?.({ bodies, data });
       })
@@ -90,6 +94,7 @@ export function ModelViewer(props: ModelViewerProps) {
   useEffect(() => core.current?.setDimensionsVisible(props.showDimensions ?? true), [props.showDimensions]);
   useEffect(() => core.current?.setBodyColors(props.bodyColors ?? null), [props.bodyColors]);
   useEffect(() => core.current?.setExplode(props.explode ?? 0), [props.explode]);
+  useEffect(() => core.current?.setPieceMarks(props.pieceMarks ?? null, props.pieceMarks?.mode), [props.pieceMarks]);
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-lg bg-[#f3f4f6]">

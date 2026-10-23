@@ -63,3 +63,30 @@ describe("arcos", () => {
     expect(formatAngle((22.5 * Math.PI) / 180)).toBe("22,5°");
   });
 });
+
+import { circle3d, dimension3dText, fromPlane, onPlane } from "./dim";
+
+describe("arcos en 3D", () => {
+  // arco de radio 1280 en un plano inclinado, centrado en (100, 200, 300)
+  const C: [number, number, number] = [100, 200, 300];
+  const u: [number, number, number] = [1, 0, 0];
+  const v: [number, number, number] = [0, Math.SQRT1_2, Math.SQRT1_2];
+  const at = (deg: number): [number, number, number] => {
+    const t = (deg * Math.PI) / 180;
+    return [0, 1, 2].map((k) => C[k] + 1280 * (Math.cos(t) * u[k] + Math.sin(t) * v[k])) as [number, number, number];
+  };
+  it("centro y radio por tres puntos", () => {
+    const c = circle3d(at(67.5), at(90), at(112.5))!;
+    expect(c.r).toBeCloseTo(1280, 6);
+    c.center.forEach((x, k) => expect(x).toBeCloseTo(C[k], 6));
+    const q = onPlane(c, at(100));
+    fromPlane(c, q).forEach((x, k) => expect(x).toBeCloseTo(at(100)[k], 6));
+    expect(circle3d([0, 0, 0], [1, 1, 1], [2, 2, 2])).toBeNull();
+  });
+  it("textos de radio, diámetro y arco", () => {
+    const base = { a: at(67.5), c: at(90), b: at(112.5), offset: at(90), axis: "aligned" as const, label: null };
+    expect(dimension3dText({ ...base, kind: "radius" }, "cm", 1)!.text).toBe("R 128");
+    expect(dimension3dText({ ...base, kind: "diameter" }, "cm", 1)!.text).toBe("Ø 256");
+    expect(dimension3dText({ ...base, kind: "arc" }, "cm", 1)!.text).toBe("⌒ 100,5");
+  });
+});

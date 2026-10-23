@@ -4,15 +4,16 @@
 import * as THREE from "three";
 import { CSS2DObject, CSS2DRenderer } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { dim3d, formatLength } from "@/lib/geometry/dim";
+import { arcSweep, circle3d, dim3d, dimension3dText, formatLength, fromPlane, onPlane } from "@/lib/geometry/dim";
 import { explodeOffsets } from "@/lib/geometry/explode";
 import { bodyEdges, type Body, type Edge } from "@/lib/geometry/mesh";
-import type { Dimension, DimensionAxis, Vec3 } from "@/lib/types";
+import type { Dimension, DimensionAxis, DimensionKind, Vec2, Vec3 } from "@/lib/types";
 
 export type SnapKind = "vertex" | "midpoint" | "edge" | "face";
 export type Snap = { point: Vec3; kind: SnapKind; body: string };
 
-export type MeasureDraft = { a: Vec3 | null; b: Vec3 | null };
+/** Puntos elegidos de la cota en preparación y cuántos hacen falta (2 lineal, 3 en arcos). */
+export type MeasureDraft = { points: Vec3[]; needed: number };
 
 export type ViewerEvents = {
   onHoverBody?: (name: string | null) => void;
@@ -64,7 +65,8 @@ export class ViewerCore {
 
   private measuring = false;
   private axis: DimensionAxis = "aligned";
-  private draft: MeasureDraft = { a: null, b: null };
+  private draft: Vec3[] = [];
+  private kind: DimensionKind = "linear";
   private unit: "mm" | "cm" = "cm";
   private decimals = 1;
   private hoverBody: string | null = null;
@@ -366,7 +368,78 @@ export class ViewerCore {
     return { segs, mid, value: g.value };
   }
 
+  /**
+   * Cotas de arco (radio, diámetro, longitud): todo se dibuja en el plano del arco y se pasa al espacio.
+   * `offset` es dónde va el texto (radio/diámetro) o por dónde pasa la cota concéntrica (arco).
+   */
+  private curvedSegments(d: Pick<Dimension, "kind" | "a" | "b" | "c" | "offset" | "axis" | "label">) {
+    if (!d.c) return null;
+    const circ = circle3d(d.a, d.c, d.b);
+    if (!circ) return null;
+    const W3 = (q: Vec2) => v3(fromPlane(circ, q));
+    const r = circ.r;
+    let P = onPlane(circ, d.offset);
+    if (Math.hypot(...P) < 1e-6) P = onPlane(circ, d.c);
+    const px = this.worldPerPixel(v3(fromPlane(circ, P)));
+    const L = px * 11, Wd = px * 3.5;
+    const segs: THREE.Vector3[] = [];
+    const line = (p: Vec2, q: Vec2) => segs.push(W3(p), W3(q));
+    // flecha con la punta en `tip`, abierta hacia `back` (unitario, en el plano)
+    const arrow = (tip: Vec2, back: Vec2) => {
+      const base: Vec2 = [tip[0] + back[0] * L, tip[1] + back[1] * L];
+      const n: Vec2 = [-back[1], back[0]];
+      line(tip, [base[0] + n[0] * Wd, base[1] + n[1] * Wd]);
+      line(tip, [base[0] - n[0] * Wd, base[1] - n[1] * Wd]);
+    };
+    const text = dimension3dText({ ...d, kind: d.kind ?? "linear" }, this.unit, this.decimals)?.text ?? "";
+    if (d.kind === "radius" || d.kind === "diameter") {
+      const lp = Math.hypot(...P);
+      const u: Vec2 = [P[0] / lp, P[1] / lp];
+      const Q: Vec2 = [u[0] * r, u[1] * r];
+      const outside = lp > r;
+      const inward: Vec2 = [-u[0], -u[1]];
+      // Con un arco grande respecto del modelo, la cota se dibuja corta: del arco al texto
+      const short = r > this.size * 0.6;
+      if (short) line(Q, P);
+      else {
+        const far = outside ? P : Q;
+        line(d.kind === "diameter" ? [-u[0] * r, -u[1] * r] : [0, 0], far);
+        const k = px * 6;
+        line([-k, 0], [k, 0]);
+        line([0, -k], [0, k]);
+      }
+      arrow(Q, outside ? u : inward);
+      if (d.kind === "diameter" && !short) arrow([-Q[0], -Q[1]], u);
+      return { segs, labelPos: W3(P), text };
+    }
+    // longitud de arco: cota concéntrica de radio |P| entre los extremos
+    const A = onPlane(circ, d.a), M = onPlane(circ, d.c), B = onPlane(circ, d.b);
+    const sweep = arcSweep([0, 0], A, M, B);
+    const t0 = Math.atan2(A[1], A[0]);
+    const Rd = Math.hypot(...P);
+    const at = (t: number, rr = Rd): Vec2 => [Math.cos(t) * rr, Math.sin(t) * rr];
+    const N = Math.max(12, Math.ceil(Math.abs(sweep) / 0.04));
+    for (let i = 0; i < N; i++) line(at(t0 + (sweep * i) / N), at(t0 + (sweep * (i + 1)) / N));
+    for (const t of [t0, t0 + sweep]) {
+      const dir = Rd >= r ? 1 : -1;
+      line(at(t, r + dir * Math.min(px * 4, Math.abs(Rd - r) * 0.2)), at(t, Rd + dir * px * 6));
+    }
+    const tan = (t: number, s: number): Vec2 => [-Math.sin(t) * s, Math.cos(t) * s];
+    const sg = Math.sign(sweep) || 1;
+    arrow(at(t0), tan(t0, sg));
+    arrow(at(t0 + sweep), tan(t0 + sweep, -sg));
+    return { segs, labelPos: W3(at(t0 + sweep / 2, Rd + (Rd >= r ? 1 : -1) * px * 14)), text };
+  }
+
   private updateDimVisual(v: DimVisual) {
+    if (v.dim.kind && v.dim.kind !== "linear") {
+      const c = this.curvedSegments(v.dim);
+      if (!c) return;
+      v.lines.geometry.setFromPoints(c.segs);
+      v.label.position.copy(c.labelPos);
+      v.label.element.textContent = c.text;
+      return;
+    }
     const r = this.dimSegments(v.dim.a, v.dim.b, v.dim.offset, v.dim.axis);
     if (!r) return;
     v.lines.geometry.setFromPoints(r.segs);
@@ -382,9 +455,13 @@ export class ViewerCore {
 
   // ── Medición ──────────────────────────────────────────────────────────
 
-  setMeasuring(on: boolean, axis: DimensionAxis) {
+  setMeasuring(on: boolean, axis: DimensionAxis, kind: DimensionKind = "linear") {
     this.measuring = on;
     this.axis = axis;
+    if (kind !== this.kind) {
+      this.kind = kind;
+      this.cancelDraft();
+    }
     if (!on) this.cancelDraft();
     this.renderer.domElement.style.cursor = on ? "crosshair" : "";
   }
@@ -393,11 +470,23 @@ export class ViewerCore {
     this.axis = axis;
   }
 
+  private get needed() {
+    return this.kind === "linear" ? 2 : 3;
+  }
+
   cancelDraft() {
-    this.draft = { a: null, b: null };
+    this.draft = [];
     this.preview.visible = false;
     this.previewLabel.visible = false;
-    this.events.onDraftChange?.(this.draft);
+    this.events.onDraftChange?.({ points: [], needed: this.needed });
+  }
+
+  /** Cota en preparación con los puntos ya elegidos (arcos: inicio, intermedio y final). */
+  private draftDimension(offset: Vec3): Omit<Dimension, "id"> {
+    const [p0, p1, p2] = this.draft;
+    return this.kind === "linear"
+      ? { kind: "linear", a: p0, b: p1, offset, axis: this.axis, label: null }
+      : { kind: this.kind, a: p0, c: p1, b: p2, offset, axis: "aligned", label: null };
   }
 
   private mouse(ev: PointerEvent) {
@@ -465,14 +554,26 @@ export class ViewerCore {
     return null;
   }
 
-  /** Punto de colocación de la línea de cota: el cursor sobre el plano que pasa por el medio y mira a la cámara. */
+  /**
+   * Punto de colocación: lineal, el cursor sobre el plano que pasa por el medio y mira a la cámara;
+   * arcos, el cursor sobre el plano del arco (o, si se mira casi de canto, el que mira a la cámara).
+   */
   private placementPoint(mx: number, my: number, w: number, h: number) {
-    const { a, b } = this.draft;
-    if (!a || !b) return null;
-    const mid = v3(a).add(v3(b)).multiplyScalar(0.5);
-    const normal = this.camera.getWorldDirection(new THREE.Vector3());
-    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, mid);
+    if (this.draft.length < this.needed) return null;
     this.raycaster.setFromCamera(new THREE.Vector2((mx / w) * 2 - 1, -(my / h) * 2 + 1), this.camera);
+    let plane: THREE.Plane;
+    const camDir = this.camera.getWorldDirection(new THREE.Vector3());
+    if (this.kind !== "linear") {
+      const circ = circle3d(this.draft[0], this.draft[1], this.draft[2]);
+      if (!circ) return null;
+      const n = v3(circ.normal);
+      plane = Math.abs(n.dot(this.raycaster.ray.direction)) > 0.08
+        ? new THREE.Plane().setFromNormalAndCoplanarPoint(n, v3(circ.center))
+        : new THREE.Plane().setFromNormalAndCoplanarPoint(camDir, v3(circ.center));
+    } else {
+      const mid = v3(this.draft[0]).add(v3(this.draft[1])).multiplyScalar(0.5);
+      plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camDir, mid);
+    }
     const p = this.raycaster.ray.intersectPlane(plane, new THREE.Vector3());
     return p ? arr(p) : null;
   }
@@ -485,39 +586,52 @@ export class ViewerCore {
   }
 
   private updatePreview(mx: number, my: number, w: number, h: number) {
-    const { a, b } = this.draft;
-    if (a && !b) {
+    const pts = this.draft;
+    if (pts.length && pts.length < this.needed) {
       const s = this.snapAt(mx, my, w, h);
       this.showMarker(s);
       if (!s) return;
-      const pa = v3(a);
-      const pb = v3(s.point);
-      this.preview.geometry.setFromPoints([pa, pb]);
+      // guía: los puntos elegidos y el del cursor
+      const chain = [...pts, s.point].map(v3);
+      const segs: THREE.Vector3[] = [];
+      for (let i = 0; i + 1 < chain.length; i++) segs.push(chain[i], chain[i + 1]);
+      this.preview.geometry.setFromPoints(segs);
       this.preview.visible = true;
-      const g = dim3d(a, s.point, s.point, this.axis);
-      this.previewLabel.visible = !!g;
-      if (g) {
-        this.previewLabel.position.copy(pa.add(pb).multiplyScalar(0.5));
-        this.previewLabel.element.textContent = formatLength(g.value, this.unit, this.decimals);
-      }
-    } else if (a && b) {
+      if (this.kind === "linear") {
+        const g = dim3d(pts[0], s.point, s.point, this.axis);
+        this.previewLabel.visible = !!g;
+        if (g) {
+          this.previewLabel.position.copy(chain[0].clone().add(chain[1]).multiplyScalar(0.5));
+          this.previewLabel.element.textContent = formatLength(g.value, this.unit, this.decimals);
+        }
+      } else this.previewLabel.visible = false;
+    } else if (pts.length >= this.needed) {
       this.showMarker(null);
       const off = this.placementPoint(mx, my, w, h);
       if (!off) return;
-      const r = this.dimSegments(a, b, off, this.axis);
-      if (!r) return;
-      this.preview.geometry.setFromPoints(r.segs);
+      const d = this.draftDimension(off);
+      if (this.kind !== "linear") {
+        const c = this.curvedSegments(d);
+        if (!c) return;
+        this.preview.geometry.setFromPoints(c.segs);
+        this.previewLabel.position.copy(c.labelPos);
+        this.previewLabel.element.textContent = c.text;
+      } else {
+        const r = this.dimSegments(d.a, d.b, off, this.axis);
+        if (!r) return;
+        this.preview.geometry.setFromPoints(r.segs);
+        this.previewLabel.position.copy(r.mid);
+        this.previewLabel.element.textContent = formatLength(r.value, this.unit, this.decimals);
+      }
       this.preview.visible = true;
       this.previewLabel.visible = true;
-      this.previewLabel.position.copy(r.mid);
-      this.previewLabel.element.textContent = formatLength(r.value, this.unit, this.decimals);
     }
   }
 
   private onPointerMove = (ev: PointerEvent) => {
     const { x, y, w, h } = this.mouse(ev);
     if (this.measuring && this.exploded === 0) {
-      if (!this.draft.a) this.showMarker(this.snapAt(x, y, w, h));
+      if (!this.draft.length) this.showMarker(this.snapAt(x, y, w, h));
       else this.updatePreview(x, y, w, h);
       return;
     }
@@ -545,24 +659,22 @@ export class ViewerCore {
       this.events.onSelectDimension?.(null);
       return;
     }
-    if (!this.draft.a) {
+    if (this.draft.length < this.needed) {
       const s = this.snapAt(x, y, w, h);
       if (!s) return;
-      this.draft = { a: s.point, b: null };
-    } else if (!this.draft.b) {
-      const s = this.snapAt(x, y, w, h);
-      if (!s) return;
-      if (Math.hypot(s.point[0] - this.draft.a[0], s.point[1] - this.draft.a[1], s.point[2] - this.draft.a[2]) < 1e-6) return;
-      this.draft = { a: this.draft.a, b: s.point };
+      const p = s.point;
+      if (this.draft.some((q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < 1e-6)) return;
+      // tres puntos alineados no definen un arco
+      if (this.draft.length === 2 && this.kind !== "linear" && !circle3d(this.draft[0], this.draft[1], p)) return;
+      this.draft = [...this.draft, p];
     } else {
       const off = this.placementPoint(x, y, w, h);
       if (!off) return;
-      const { a, b } = this.draft;
-      this.events.onCreateDimension?.({ a, b, offset: off, axis: this.axis, label: null });
+      this.events.onCreateDimension?.(this.draftDimension(off));
       this.cancelDraft();
       return;
     }
-    this.events.onDraftChange?.(this.draft);
+    this.events.onDraftChange?.({ points: this.draft, needed: this.needed });
     this.updatePreview(x, y, w, h);
   };
 

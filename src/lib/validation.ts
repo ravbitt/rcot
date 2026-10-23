@@ -5,8 +5,10 @@ export const vec3 = z.tuple([num, num, num]);
 export const vec2 = z.tuple([num, num]);
 
 export const dimensionInput = z.object({
+  kind: z.enum(["linear", "radius", "diameter", "arc"]).optional(),
   a: vec3,
   b: vec3,
+  c: vec3.nullable().optional(),
   offset: vec3,
   axis: z.enum(["aligned", "x", "y", "z"]),
   label: z.string().trim().max(80).nullable().optional(),
@@ -14,6 +16,7 @@ export const dimensionInput = z.object({
 
 export const dimensionPatch = z.object({
   offset: vec3.optional(),
+  c: vec3.nullable().optional(),
   axis: z.enum(["aligned", "x", "y", "z"]).optional(),
   label: z.string().trim().max(80).nullable().optional(),
 });

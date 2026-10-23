@@ -19,7 +19,7 @@ export async function ModelShareView({ token, m, showSheets, backHref, project }
       backHref={backHref}
       project={project}
       model={{ id: m.id, name: m.name, bbox: m.bbox, notes: m.notes }}
-      dimensions={dims.map((d) => ({ id: d.id, a: d.a, b: d.b, offset: d.offset, axis: d.axis, label: d.label }))}
+      dimensions={dims.map((d) => ({ id: d.id, kind: d.kind, a: d.a, b: d.b, c: d.c, offset: d.offset, axis: d.axis, label: d.label }))}
       sheets={sheets}
     />
   );

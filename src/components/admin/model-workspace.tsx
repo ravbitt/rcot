@@ -29,9 +29,9 @@ import { PiecesList } from "@/components/viewer/pieces-list";
 import { groupPieces, type PieceGroup } from "@/lib/geometry/pieces";
 import { useUnit } from "@/hooks/use-unit";
 import { deleteModel, moveModel, renameModel } from "@/lib/actions";
-import { dim3d, formatLength } from "@/lib/geometry/dim";
+import { dimension3dText } from "@/lib/geometry/dim";
 import type { MeasureDraft, ViewerCore } from "@/lib/viewer/core";
-import type { Dimension, DimensionAxis, SheetData, Vec3 } from "@/lib/types";
+import type { Dimension, DimensionAxis, DimensionKind, SheetData, Vec3 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type ModelInfo = { id: string; name: string; bodyCount: number; bbox: [Vec3, Vec3]; originalName: string; format: string; folderId: string | null };
@@ -164,14 +164,40 @@ function DeleteModelButton({ id, name }: { id: string; name: string }) {
 
 const AXIS_LABEL: Record<DimensionAxis, string> = { aligned: "Alineada", x: "Eje X", y: "Eje Y", z: "Eje Z" };
 
+/** Modo de medición: lineal (alineada o por eje) o de un arco (3 puntos). */
+type MeasureMode = DimensionAxis | Exclude<DimensionKind, "linear">;
+const MODES: { value: MeasureMode; label: string; title: string }[] = [
+  { value: "aligned", label: "Alineada", title: "Distancia real entre dos puntos" },
+  { value: "x", label: "X", title: "Proyectada sobre el eje X" },
+  { value: "y", label: "Y", title: "Proyectada sobre el eje Y" },
+  { value: "z", label: "Z", title: "Proyectada sobre el eje Z" },
+  { value: "radius", label: "R", title: "Radio: 3 puntos del arco" },
+  { value: "diameter", label: "Ø", title: "Diámetro: 3 puntos del arco" },
+  { value: "arc", label: "Arco", title: "Longitud de arco: inicio, punto intermedio y final" },
+];
+const KIND_LABEL: Record<DimensionKind, string> = { linear: "", radius: "Radio", diameter: "Diámetro", arc: "Arco" };
+
+function measureStep(mode: MeasureMode, n: number) {
+  const curved = mode === "radius" || mode === "diameter" || mode === "arc";
+  const steps = curved
+    ? mode === "arc"
+      ? ["Clic en el inicio del arco", "Clic en un punto intermedio del arco", "Clic en el final del arco"]
+      : ["Clic en un punto del arco", "Clic en otro punto del arco", "Clic en un tercer punto del arco"]
+    : ["Haz clic en el primer punto", "Haz clic en el segundo punto"];
+  return steps[n] ?? (curved ? "Mueve para ubicar la cota y haz clic" : "Mueve para ubicar la cota y haz clic");
+}
+
 function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimension[] }) {
   const [dims, setDims] = useState(initial);
   const [selected, setSelected] = useState<string | null>(null);
   const [measuring, setMeasuring] = useState(false);
-  const [axis, setAxis] = useState<DimensionAxis>("aligned");
+  const [mode, setMode] = useState<MeasureMode>("aligned");
+  const isCurved = mode === "radius" || mode === "diameter" || mode === "arc";
+  const axis: DimensionAxis = isCurved ? "aligned" : (mode as DimensionAxis);
+  const measureKind: DimensionKind = isCurved ? (mode as DimensionKind) : "linear";
   const [unit, setUnit] = useUnit();
   const [showDims, setShowDims] = useState(true);
-  const [draft, setDraft] = useState<MeasureDraft>({ a: null, b: null });
+  const [draft, setDraft] = useState<MeasureDraft>({ points: [], needed: 2 });
   const [bodies, setBodies] = useState<string[]>([]);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [pieces, setPieces] = useState<{ groups: PieceGroup[]; bodyGroup: number[] } | null>(null);
@@ -218,16 +244,16 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
     function onKey(e: KeyboardEvent) {
       if ((e.target as HTMLElement).closest("input, textarea")) return;
       if (e.key === "Escape") {
-        if (draft.a) core.current?.cancelDraft();
+        if (draft.points.length) core.current?.cancelDraft();
         else setMeasuring(false);
       } else if ((e.key === "Delete" || e.key === "Backspace") && selected) remove(selected);
       else if (e.key.toLowerCase() === "m") setMeasuring((m) => !m);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [draft.a, selected, remove]);
+  }, [draft.points.length, selected, remove]);
 
-  const step = explode > 0 ? "Vista explosionada: las cotas se ocultan (doble clic en el deslizador para armar)" : !measuring ? null : !draft.a ? "Haz clic en el primer punto" : !draft.b ? "Haz clic en el segundo punto" : "Mueve para ubicar la cota y haz clic";
+  const step = explode > 0 ? "Vista explosionada: las cotas se ocultan (doble clic en el deslizador para armar)" : !measuring ? null : measureStep(mode, draft.points.length);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -239,6 +265,7 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
           decimals={decimals}
           measuring={measuring}
           axis={axis}
+          measureKind={measureKind}
           selectedId={selected}
           hiddenBodies={hidden}
           showDimensions={showDims}
@@ -266,10 +293,10 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
             >
               <Ruler /> {measuring ? "Midiendo" : "Medir"}
             </Button>
-            <ToggleGroup type="single" size="sm" variant="outline" value={axis} onValueChange={(v) => v && setAxis(v as DimensionAxis)}>
-              {(Object.keys(AXIS_LABEL) as DimensionAxis[]).map((k) => (
-                <ToggleGroupItem key={k} value={k} title={AXIS_LABEL[k]}>
-                  {k === "aligned" ? "Alineada" : k.toUpperCase()}
+            <ToggleGroup type="single" size="sm" variant="outline" value={mode} onValueChange={(v) => v && setMode(v as MeasureMode)}>
+              {MODES.map((m) => (
+                <ToggleGroupItem key={m.value} value={m.value} title={m.title}>
+                  {m.label}
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
@@ -321,18 +348,18 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
           {dims.length === 0 && <p className="p-3 text-sm text-muted-foreground">Sin cotas todavía.</p>}
           <ul className="divide-y">
             {dims.map((d) => {
-              const g = dim3d(d.a, d.b, d.offset, d.axis);
+              const g = dimension3dText({ ...d, label: null }, unit, decimals);
               return (
                 <li
                   key={d.id}
                   className={cn("flex items-center gap-2 px-3 py-2 text-sm", selected === d.id && "bg-primary/5")}
                   onClick={() => setSelected(d.id)}
                 >
-                  <span className="w-16 shrink-0 font-mono font-semibold">{g ? formatLength(g.value, unit, decimals) : "—"}</span>
+                  <span className="w-20 shrink-0 font-mono font-semibold">{g ? g.text : "—"}</span>
                   <Input
                     className="h-7 text-xs"
                     defaultValue={d.label ?? ""}
-                    placeholder={AXIS_LABEL[d.axis]}
+                    placeholder={d.kind && d.kind !== "linear" ? KIND_LABEL[d.kind] : AXIS_LABEL[d.axis]}
                     onBlur={(e) => {
                       const v = e.target.value.trim() || null;
                       if (v !== d.label) patch(d.id, { label: v });

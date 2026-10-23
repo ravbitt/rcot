@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { fetchMesh, type Body } from "@/lib/geometry/mesh";
 import { ViewerCore, type MeasureDraft } from "@/lib/viewer/core";
-import type { Dimension, DimensionAxis, MeshData } from "@/lib/types";
+import type { Dimension, DimensionAxis, DimensionKind, MeshData } from "@/lib/types";
 
 export type ModelViewerProps = {
   meshUrl: string;
@@ -13,6 +13,8 @@ export type ModelViewerProps = {
   decimals: number;
   measuring?: boolean;
   axis?: DimensionAxis;
+  /** Tipo de cota que se mide: lineal o de un arco (radio, diámetro, longitud) */
+  measureKind?: DimensionKind;
   selectedId?: string | null;
   hiddenBodies?: Set<string>;
   showDimensions?: boolean;
@@ -80,7 +82,10 @@ export function ModelViewer(props: ModelViewerProps) {
   useEffect(() => core.current?.setDimensions(props.dimensions), [props.dimensions]);
   useEffect(() => core.current?.setFormat(props.unit, props.decimals), [props.unit, props.decimals]);
   useEffect(() => core.current?.setSelected(props.selectedId ?? null), [props.selectedId]);
-  useEffect(() => core.current?.setMeasuring(!!props.measuring, props.axis ?? "aligned"), [props.measuring, props.axis]);
+  useEffect(
+    () => core.current?.setMeasuring(!!props.measuring, props.axis ?? "aligned", props.measureKind ?? "linear"),
+    [props.measuring, props.axis, props.measureKind],
+  );
   useEffect(() => core.current?.setHiddenBodies(props.hiddenBodies ?? new Set()), [props.hiddenBodies]);
   useEffect(() => core.current?.setDimensionsVisible(props.showDimensions ?? true), [props.showDimensions]);
   useEffect(() => core.current?.setBodyColors(props.bodyColors ?? null), [props.bodyColors]);

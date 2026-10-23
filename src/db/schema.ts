@@ -2,7 +2,7 @@
 
 import { sql } from "drizzle-orm";
 import { boolean, check, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
-import type { DimensionAxis, SheetData, Vec3 } from "@/lib/types";
+import type { DimensionAxis, DimensionKind, SheetData, Vec3 } from "@/lib/types";
 
 const ts = () => timestamp({ withTimezone: true });
 
@@ -56,6 +56,9 @@ export const dimension = pgTable(
     b: jsonb().$type<Vec3>().notNull(),
     offset: jsonb().$type<Vec3>().notNull(),
     axis: text().$type<DimensionAxis>().notNull().default("aligned"),
+    /** linear (entre a y b), o radius / diameter / arc: arco que pasa por a, c y b; `offset` ubica la cota */
+    kind: text().$type<DimensionKind>().notNull().default("linear"),
+    c: jsonb().$type<Vec3>(),
     /** Texto opcional en vez del valor medido (p. ej. «alto asiento») */
     label: text(),
     createdAt: ts().defaultNow().notNull(),

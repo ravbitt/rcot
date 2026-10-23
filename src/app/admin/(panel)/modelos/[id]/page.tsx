@@ -35,7 +35,7 @@ export default async function ModelPage({ params }: PageProps<"/admin/modelos/[i
     <ModelWorkspace
       model={{ id: m.id, name: m.name, bodyCount: m.bodyCount, bbox: m.bbox, originalName: m.originalName, format: m.format, folderId: m.folderId }}
       folders={folders}
-      dimensions={dims.map((d) => ({ id: d.id, a: d.a, b: d.b, offset: d.offset, axis: d.axis, label: d.label }))}
+      dimensions={dims.map((d) => ({ id: d.id, kind: d.kind, a: d.a, b: d.b, c: d.c, offset: d.offset, axis: d.axis, label: d.label }))}
       sheets={sheets.map((s) => ({ id: s.id, name: s.name, data: s.data, updatedAt: s.updatedAt.toISOString() }))}
       shares={shares.map((s) => ({
         id: s.id,

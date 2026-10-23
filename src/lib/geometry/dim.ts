@@ -107,3 +107,68 @@ export function formatAngle(rad: number, decimals = 1) {
   const deg = (rad * 180) / Math.PI;
   return `${deg.toFixed(decimals).replace(/\.?0+$/, "").replace(".", ",")}°`;
 }
+
+// ── Arcos en 3D (radio, diámetro y longitud de arco en el visor) ────────
+
+type V3 = [number, number, number];
+const sub3 = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot3 = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const len3 = (a: V3) => Math.hypot(a[0], a[1], a[2]);
+
+export type Circle3D = { center: V3; normal: V3; r: number; e1: V3; e2: V3 };
+
+/**
+ * Circunferencia que pasa por tres puntos del espacio, con su plano: normal y una base (e1 hacia `a`,
+ * e2 = normal × e1). null si los puntos están alineados.
+ */
+export function circle3d(a: V3, b: V3, c: V3): Circle3D | null {
+  const ab = sub3(b, a), ac = sub3(c, a);
+  const n = cross3(ab, ac);
+  const n2 = dot3(n, n);
+  const scale = Math.max(len3(ab), len3(ac), 1e-9);
+  if (n2 < 1e-12 * scale ** 4) return null;
+  // centro = a + ((|ac|² (n × ab)) + (|ab|² (ac × n))) / (2 |n|²)
+  const t1 = cross3(n, ab).map((x) => x * dot3(ac, ac)) as V3;
+  const t2 = cross3(ac, n).map((x) => x * dot3(ab, ab)) as V3;
+  const center: V3 = [a[0] + (t1[0] + t2[0]) / (2 * n2), a[1] + (t1[1] + t2[1]) / (2 * n2), a[2] + (t1[2] + t2[2]) / (2 * n2)];
+  const r = len3(sub3(a, center));
+  const nl = Math.sqrt(n2);
+  const normal: V3 = [n[0] / nl, n[1] / nl, n[2] / nl];
+  const e1 = sub3(a, center).map((x) => x / r) as V3;
+  return { center, normal, r, e1, e2: cross3(normal, e1) };
+}
+
+/** Coordenadas 2D de un punto sobre el plano de la circunferencia (base e1, e2 con origen en el centro). */
+export function onPlane(circ: Circle3D, p: V3): Vec2 {
+  const d = sub3(p, circ.center);
+  return [dot3(d, circ.e1), dot3(d, circ.e2)];
+}
+
+/** Punto del espacio a partir de coordenadas del plano de la circunferencia. */
+export function fromPlane(circ: Circle3D, q: Vec2): V3 {
+  return [0, 1, 2].map((k) => circ.center[k] + circ.e1[k] * q[0] + circ.e2[k] * q[1]) as V3;
+}
+
+/** Valor y texto de una cota 3D de cualquier tipo (el texto propio de la cota tiene prioridad). */
+export function dimension3dText(
+  d: { kind?: "linear" | "radius" | "diameter" | "arc"; a: V3; b: V3; c?: V3 | null; offset: V3; axis: "aligned" | "x" | "y" | "z"; label: string | null },
+  unit: "mm" | "cm",
+  decimals: number,
+): { value: number; text: string } | null {
+  const kind = d.kind ?? "linear";
+  if (kind === "linear") {
+    const g = dim3d(d.a, d.b, d.offset, d.axis);
+    return g && { value: g.value, text: d.label?.trim() || formatLength(g.value, unit, decimals) };
+  }
+  const circ = d.c ? circle3d(d.a, d.c, d.b) : null;
+  if (!circ) return null;
+  let value: number, prefix: string;
+  if (kind === "radius") [value, prefix] = [circ.r, "R "];
+  else if (kind === "diameter") [value, prefix] = [2 * circ.r, "Ø "];
+  else {
+    const sweep = arcSweep([0, 0], onPlane(circ, d.a), onPlane(circ, d.c!), onPlane(circ, d.b));
+    [value, prefix] = [Math.abs(sweep) * circ.r, "⌒ "];
+  }
+  return { value, text: d.label?.trim() || prefix + formatLength(value, unit, decimals) };
+}

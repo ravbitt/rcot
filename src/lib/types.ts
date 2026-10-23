@@ -6,10 +6,18 @@ export type Vec2 = [number, number];
 /** Cota alineada (distancia real entre los puntos) o proyectada sobre un eje del modelo. */
 export type DimensionAxis = "aligned" | "x" | "y" | "z";
 
+/** Cota 3D lineal, o de un arco que pasa por a, c (intermedio) y b: radio, diámetro o longitud de arco. */
+export type DimensionKind = "linear" | "radius" | "diameter" | "arc";
+
 export type Dimension = {
   id: string;
+  /** Ausente = linear */
+  kind?: DimensionKind;
   a: Vec3;
   b: Vec3;
+  /** Punto intermedio del arco (radio, diámetro, arco) */
+  c?: Vec3 | null;
+  /** Lineal: punto por donde pasa la línea de cota. Arcos: dónde va el texto o la cota concéntrica */
   offset: Vec3;
   axis: DimensionAxis;
   label: string | null;

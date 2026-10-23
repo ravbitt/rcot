@@ -2,42 +2,54 @@
 
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
-import { ArrowLeft, Eye, EyeOff, FileText, Maximize, Palette, Ruler } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, FileText, Maximize, Ruler } from "lucide-react";
 import { SheetSvg } from "@/components/sheet/sheet-svg";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ModelViewer } from "@/components/viewer/model-viewer";
+import { ColorControl, type ColorMode } from "@/components/viewer/color-control";
 import { ExplodeSlider } from "@/components/viewer/explode-slider";
 import { MarksControl, type MarksMode } from "@/components/viewer/marks-control";
 import { PiecesList } from "@/components/viewer/pieces-list";
-import { groupPieces, type PieceGroup } from "@/lib/geometry/pieces";
+import type { Body } from "@/lib/geometry/mesh";
+import { groupPieces } from "@/lib/geometry/pieces";
+import { materialBodyColors } from "@/lib/materials";
 import { useUnit } from "@/hooks/use-unit";
 import { formatLength } from "@/lib/geometry/dim";
 import type { ViewerCore } from "@/lib/viewer/core";
-import type { Dimension, SheetData, Vec3 } from "@/lib/types";
+import type { Dimension, Material, MaterialMap, SheetData, Vec3 } from "@/lib/types";
 
 type Props = {
   token: string;
   /** Volver al proyecto (enlace de una carpeta) */
   backHref?: string;
   project?: string;
-  model: { id: string; name: string; bbox: [Vec3, Vec3]; notes: string };
+  model: { id: string; name: string; bbox: [Vec3, Vec3]; notes: string; meshVersion: string };
   dimensions: Dimension[];
   sheets: { id: string; name: string; data: SheetData }[];
+  /** Materiales que usa el modelo y el de cada pieza */
+  catalog: Material[];
+  materials: MaterialMap;
 };
 
 /** Vista de solo lectura para el cliente: modelo 3D con cotas y planos. */
-export function ClientView({ token, backHref, project, model, dimensions, sheets }: Props) {
+export function ClientView({ token, backHref, project, model, dimensions, sheets, catalog, materials }: Props) {
   const [tab, setTab] = useState<"modelo" | "planos">("modelo");
   const [unit, setUnit] = useUnit();
   const [selected, setSelected] = useState<string | null>(null);
   const [showDims, setShowDims] = useState(true);
-  const [pieces, setPieces] = useState<{ groups: PieceGroup[]; bodyGroup: number[] } | null>(null);
-  const [colored, setColored] = useState(false);
+  const [meshBodies, setMeshBodies] = useState<Body[] | null>(null);
+  const pieces = useMemo(() => (meshBodies ? groupPieces(meshBodies, materials) : null), [meshBodies, materials]);
+  const hasMaterials = !!pieces?.groups.some((g) => catalog.some((m) => m.id === g.materialId));
+  const [colored, setColored] = useState<ColorMode>(null);
   const [explode, setExplode] = useState(0);
   const [marksMode, setMarksMode] = useState<MarksMode>(null);
   const pieceMarks = useMemo(() => (marksMode && pieces ? { groups: pieces.groups, bodyGroup: pieces.bodyGroup, mode: marksMode } : null), [marksMode, pieces]);
-  const bodyColors = useMemo(() => (colored && pieces ? pieces.bodyGroup.map((g) => pieces.groups[g].color) : null), [colored, pieces]);
+  const bodyColors = useMemo(() => {
+    if (!colored || !pieces) return null;
+    if (colored === "material" && hasMaterials) return materialBodyColors(pieces.groups, pieces.bodyGroup, catalog);
+    return pieces.bodyGroup.map((g) => pieces.groups[g].color);
+  }, [colored, pieces, hasMaterials, catalog]);
   const core = useRef<ViewerCore | null>(null);
   const decimals = unit === "cm" ? 1 : 0;
   const [min, max] = model.bbox;
@@ -80,7 +92,7 @@ export function ClientView({ token, backHref, project, model, dimensions, sheets
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
           <div className="relative min-h-[55svh] flex-1 p-2 md:min-h-0">
             <ModelViewer
-              meshUrl={`/api/models/${model.id}/mesh?t=${encodeURIComponent(token)}`}
+              meshUrl={`/api/models/${model.id}/mesh?t=${encodeURIComponent(token)}&v=${model.meshVersion}`}
               dimensions={dimensions}
               unit={unit}
               decimals={decimals}
@@ -89,14 +101,12 @@ export function ClientView({ token, backHref, project, model, dimensions, sheets
               onSelect={setSelected}
               bodyColors={bodyColors}
               explode={explode}
-          pieceMarks={pieceMarks}
-              onLoaded={({ bodies }) => setPieces(groupPieces(bodies))}
+              pieceMarks={pieceMarks}
+              onLoaded={({ bodies }) => setMeshBodies(bodies)}
               onCore={(c) => (core.current = c)}
             />
             <div className="absolute top-4 right-4 flex gap-1 rounded-lg border bg-background/95 p-1 shadow-sm">
-              <Button size="icon-sm" variant={colored ? "default" : "ghost"} onClick={() => setColored((c) => !c)} title="Colorear piezas">
-                <Palette />
-              </Button>
+              <ColorControl value={colored} onChange={setColored} materials={hasMaterials} />
               <MarksControl value={marksMode} onChange={setMarksMode} />
               <ExplodeSlider value={explode} onChange={setExplode} />
               <Button size="icon-sm" variant="ghost" onClick={() => setShowDims((s) => !s)} title={showDims ? "Ocultar cotas" : "Mostrar cotas"}>
@@ -114,7 +124,7 @@ export function ClientView({ token, backHref, project, model, dimensions, sheets
             <aside className="max-h-[40svh] shrink-0 overflow-y-auto border-t md:max-h-none md:w-80 md:border-t-0 md:border-l">
               <h2 className="border-b p-3 text-sm font-semibold">Despiece</h2>
               <div className="pb-2">
-                <PiecesList groups={pieces.groups} unit={unit} decimals={decimals} />
+                <PiecesList groups={pieces.groups} unit={unit} decimals={decimals} catalog={catalog} />
               </div>
               {!colored && <p className="border-t p-3 text-xs text-muted-foreground">Activa la paleta para ver cada pieza con su color.</p>}
             </aside>

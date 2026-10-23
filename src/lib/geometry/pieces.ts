@@ -4,10 +4,19 @@
 // cuña miden lo que mide la tabla, no su caja en los ejes del mundo). Dos piezas son iguales si tienen
 // las mismas medidas (±0,5 mm) y el mismo volumen (distingue una escuadra triangular de un taco).
 
-import type { PieceRow, Vec3 } from "@/lib/types";
+import type { Material, MaterialMap, PieceRow, Vec3 } from "@/lib/types";
 import { cross, dot, norm, sub, type Body } from "./mesh";
 
-export type PieceGroup = PieceRow & { bodies: number[]; names: string[] };
+export type PieceGroup = PieceRow & {
+  bodies: number[];
+  names: string[];
+  /** Id del material asignado (el mismo para todas las piezas del grupo), o null */
+  materialId: string | null;
+  /** Tiene caras curvas (arcos, forros): se fabrica distinto que una tabla recta */
+  curved: boolean;
+  /** Superficie de una cara de la pieza en mm² (la mitad de su superficie total): para láminas curvas */
+  face: number;
+};
 
 /** Nombre base: quita los sufijos de posición o número (Pata_FI → Pata, BandaAlta_Lat_I → BandaAlta Lat). */
 export function baseName(name: string) {
@@ -45,18 +54,20 @@ export function markFor(i: number) {
 }
 
 /** Medidas (largo ≥ ancho ≥ espesor) y volumen de una pieza. */
-export function bodyMeasure(body: Body): { dims: [number, number, number]; volume: number } {
+export function bodyMeasure(body: Body): { dims: [number, number, number]; volume: number; curved: boolean; surface: number } {
   const P = body.positions;
   const I = body.indices;
   const v = (i: number): Vec3 => [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]];
   // Área por dirección de normal (n y −n cuentan como el mismo eje)
   const clusters: { n: Vec3; area: number }[] = [];
   let volume = 0;
+  let surface = 0;
   for (let t = 0; t < I.length; t += 3) {
     const a = v(I[t]), b = v(I[t + 1]), c = v(I[t + 2]);
     const cr = cross(sub(b, a), sub(c, a));
     const area = Math.hypot(...cr) / 2;
     volume += dot(a, cross(b, c)) / 6;
+    surface += area;
     if (area < 1e-9) continue;
     let n = norm(cr);
     if (n[0] < -1e-9 || (Math.abs(n[0]) <= 1e-9 && (n[1] < -1e-9 || (Math.abs(n[1]) <= 1e-9 && n[2] < 0)))) n = [-n[0], -n[1], -n[2]];
@@ -98,23 +109,31 @@ export function bodyMeasure(body: Body): { dims: [number, number, number]; volum
     }
   }
   const d = [...best!].sort((a, b) => b - a) as [number, number, number];
-  return { dims: d, volume: Math.abs(volume) };
+  // Curva: más del 3 % de la superficie está repartida en facetas chicas (cada dirección < 1,5 %), como la
+  // malla de un arco o un forro. Una tabla, una cuña o una pieza con cortes en ángulo tiene pocas caras grandes.
+  const faceted = clusters.reduce((a, c) => (c.area < surface * 0.015 ? a + c.area : a), 0);
+  return { dims: d, volume: Math.abs(volume), curved: surface > 0 && faceted / surface > 0.03, surface };
 }
 
-/** Agrupa las piezas iguales. Devuelve los grupos (ordenados por tamaño) y el grupo de cada cuerpo. */
-export function groupPieces(bodies: Body[]): { groups: PieceGroup[]; bodyGroup: number[] } {
+/**
+ * Agrupa las piezas iguales. Devuelve los grupos (ordenados por tamaño) y el grupo de cada cuerpo.
+ * Con `materials` (nombre de pieza → id de material), dos piezas iguales de distinto material van en grupos distintos.
+ */
+export function groupPieces(bodies: Body[], materials?: MaterialMap | null): { groups: PieceGroup[]; bodyGroup: number[] } {
   const r = (x: number) => Math.round(x * 2) / 2;
-  const map = new Map<string, { dims: [number, number, number]; bodies: number[]; names: string[] }>();
+  type Acc = { dims: [number, number, number]; bodies: number[]; names: string[]; materialId: string | null; curved: boolean; face: number };
+  const map = new Map<string, Acc>();
   bodies.forEach((b, i) => {
     const m = bodyMeasure(b);
     const dims = m.dims.map(r) as [number, number, number];
+    const materialId = materials?.[b.name] ?? null;
     // volumen en cm³ redondeado: separa formas distintas con la misma caja
-    const key = `${dims.join("x")}|${Math.round(m.volume / 1000)}`;
+    const key = `${dims.join("x")}|${Math.round(m.volume / 1000)}|${materialId ?? ""}`;
     const g = map.get(key);
     if (g) {
       g.bodies.push(i);
       g.names.push(b.name);
-    } else map.set(key, { dims, bodies: [i], names: [b.name] });
+    } else map.set(key, { dims, bodies: [i], names: [b.name], materialId, curved: m.curved, face: m.surface / 2 });
   });
   const list = [...map.values()].sort((a, b) => b.dims[0] - a.dims[0] || b.dims[1] - a.dims[1] || b.dims[2] - a.dims[2]);
   const bodyGroup = new Array<number>(bodies.length).fill(0);
@@ -129,12 +148,18 @@ export function groupPieces(bodies: Body[]): { groups: PieceGroup[]; bodyGroup: 
       color: pieceColor(i),
       bodies: g.bodies,
       names: g.names,
+      materialId: g.materialId,
+      curved: g.curved,
+      face: g.face,
     };
   });
   return { groups, bodyGroup };
 }
 
-/** Filas para la tabla (sin los índices de cuerpos). */
-export function toRows(groups: PieceGroup[]): PieceRow[] {
-  return groups.map(({ mark, name, qty, dims, color }) => ({ mark, name, qty, dims, color }));
+/** Filas para la tabla (sin los índices de cuerpos), con el nombre del material si lo tiene. */
+export function toRows(groups: PieceGroup[], catalog: Material[] = []): PieceRow[] {
+  return groups.map(({ mark, name, qty, dims, color, materialId }) => {
+    const material = catalog.find((m) => m.id === materialId)?.name;
+    return material ? { mark, name, qty, dims, color, material } : { mark, name, qty, dims, color };
+  });
 }

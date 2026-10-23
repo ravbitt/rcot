@@ -1,14 +1,16 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, max } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
-import { folder, model, share, sheet } from "@/db/schema";
+import { folder, material, model, share, sheet } from "@/db/schema";
 import { requireAdmin } from "@/lib/dal";
 import { deleteStoredFile } from "@/lib/storage";
+import type { MaterialMap } from "@/lib/types";
+import { materialInput, materialMap } from "@/lib/validation";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -128,6 +130,46 @@ export async function renameSheet(id: string, modelId: string, name: string): Pr
   const n = name.trim().slice(0, 120);
   if (!n) return { ok: false, error: "El nombre no puede quedar vacío" };
   await db.update(sheet).set({ name: n }).where(and(eq(sheet.id, id), eq(sheet.modelId, modelId)));
+  revalidatePath(`/admin/modelos/${modelId}`);
+  return { ok: true };
+}
+
+// ── Materiales ────────────────────────────────────────────────────────
+
+export async function createMaterial(input: z.input<typeof materialInput>): Promise<ActionResult & { id?: string }> {
+  await requireAdmin();
+  const p = materialInput.safeParse(input);
+  if (!p.success) return { ok: false, error: p.error.issues[0].message };
+  const [{ last }] = await db.select({ last: max(material.position) }).from(material);
+  const id = nanoid(12);
+  await db.insert(material).values({ id, ...p.data, position: (last ?? -1) + 1 });
+  revalidatePath("/admin", "layout");
+  return { ok: true, id };
+}
+
+export async function updateMaterial(id: string, input: z.input<typeof materialInput>): Promise<ActionResult> {
+  await requireAdmin();
+  const p = materialInput.safeParse(input);
+  if (!p.success) return { ok: false, error: p.error.issues[0].message };
+  await db.update(material).set(p.data).where(eq(material.id, id));
+  revalidatePath("/admin", "layout");
+  return { ok: true };
+}
+
+/** Borra el material del catálogo. Las piezas que lo tenían quedan sin material (el id deja de resolverse). */
+export async function deleteMaterial(id: string): Promise<ActionResult> {
+  await requireAdmin();
+  await db.delete(material).where(eq(material.id, id));
+  revalidatePath("/admin", "layout");
+  return { ok: true };
+}
+
+/** Guarda el material de cada pieza del modelo (nombre de pieza → id de material). */
+export async function setModelMaterials(modelId: string, map: MaterialMap): Promise<ActionResult> {
+  await requireAdmin();
+  const p = materialMap.safeParse(map);
+  if (!p.success) return { ok: false, error: "Datos inválidos" };
+  await db.update(model).set({ materials: p.data }).where(eq(model.id, modelId));
   revalidatePath(`/admin/modelos/${modelId}`);
   return { ok: true };
 }

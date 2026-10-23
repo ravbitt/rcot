@@ -262,7 +262,11 @@ function tableColumns(t: SheetTable) {
   // La columna «Pieza» se ajusta al nombre más largo (≈0,5 de la altura de letra por carácter)
   const longest = Math.max(5, ...t.rows.map((r) => r.name.length));
   const nameW = Math.min(110, Math.max(32, longest * T_FONT * 0.5 + 2.4));
-  cols.push({ key: "mark", label: "Marca", w: 11 }, { key: "name", label: "Pieza", w: nameW }, { key: "qty", label: "Cant.", w: 11, align: "end" });
+  cols.push({ key: "mark", label: "Marca", w: 11 }, { key: "name", label: "Pieza", w: nameW });
+  // Material: solo si alguna fila lo tiene (tablas creadas con materiales asignados)
+  const longestMat = Math.max(0, ...t.rows.map((r) => r.material?.length ?? 0));
+  if (longestMat) cols.push({ key: "material", label: "Material", w: Math.min(60, Math.max(20, longestMat * T_FONT * 0.5 + 2.4)) });
+  cols.push({ key: "qty", label: "Cant.", w: 11, align: "end" });
   if (t.multiplier > 1) cols.push({ key: "total", label: `Total ×${t.multiplier}`, w: 16, align: "end" });
   cols.push({ key: "l", label: "Largo", w: 15, align: "end" }, { key: "w", label: "Ancho", w: 15, align: "end" }, { key: "t", label: "Esp.", w: 13, align: "end" });
   return cols;
@@ -317,6 +321,7 @@ function PieceTable({ t, data, selected, onPointerDown }: { t: SheetTable; data:
         const vals: Record<string, string> = {
           mark: r.mark,
           name: r.name,
+          material: r.material ?? "—",
           qty: String(r.qty),
           total: String(r.qty * t.multiplier),
           l: fmt(r.dims[0]),

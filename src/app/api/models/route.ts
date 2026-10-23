@@ -4,12 +4,16 @@ import { eq } from "drizzle-orm";
 import { folder, model } from "@/db/schema";
 import { ConvertError, convertModel, formatFromName } from "@/lib/convert";
 import { isAdmin } from "@/lib/dal";
+import { findDuplicate, sha256 } from "@/lib/duplicates";
 import { deleteStoredFile, MAX_UPLOAD_BYTES, saveFile } from "@/lib/storage";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-/** Sube un modelo (STEP, IGES o STL), lo convierte a malla y lo registra. */
+/**
+ * Sube un modelo (STEP, IGES o STL), lo convierte a malla y lo registra.
+ * Si el mismo archivo ya está subido responde 409 con el modelo existente, salvo que venga `force=1`.
+ */
 export async function POST(request: Request) {
   if (!(await isAdmin())) return Response.json({ error: "No autorizado" }, { status: 401 });
   const form = await request.formData().catch(() => null);
@@ -29,6 +33,11 @@ export async function POST(request: Request) {
     if (!f) return Response.json({ error: "La carpeta no existe." }, { status: 400 });
   }
   const data = Buffer.from(await file.arrayBuffer());
+  const fileHash = sha256(data);
+  if (form?.get("force") !== "1") {
+    const duplicate = await findDuplicate(fileHash);
+    if (duplicate) return Response.json({ error: `Ya está subido como «${duplicate.name}».`, duplicate }, { status: 409 });
+  }
   let converted;
   try {
     converted = await convertModel(data, format);
@@ -53,6 +62,7 @@ export async function POST(request: Request) {
       bytes: file.size,
       bodyCount: converted.bodyCount,
       bbox: converted.bbox,
+      fileHash,
     });
     return Response.json({ id });
   } catch (err) {

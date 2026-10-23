@@ -41,6 +41,7 @@ const view = z.object({
   explode: z.number().min(0).max(5).optional(),
   marksColored: z.boolean().optional(),
   bodies: z.array(z.number().int().min(0).max(100000)).max(5000).nullable().optional(),
+  fillBy: z.enum(["piece", "material"]).optional(),
 });
 
 const pieceRow = z.object({
@@ -49,6 +50,7 @@ const pieceRow = z.object({
   qty: z.number().int().min(1).max(100000),
   dims: z.tuple([num, num, num]),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  material: z.string().max(80).optional(),
 });
 
 const table = z.object({
@@ -121,3 +123,15 @@ export const sheetData = z.object({
 });
 
 export const sheetInput = z.object({ name: z.string().trim().min(1).max(120), data: sheetData });
+
+const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Color inválido");
+
+export const materialInput = z.object({
+  name: z.string().trim().min(1, "Ponle un nombre").max(80),
+  color: hex,
+  kind: z.enum(["tablero", "liston", "lamina", "otro"]),
+  thickness: z.number().positive().max(1000).nullable(),
+});
+
+/** Nombre de pieza → id de material (null o ausente = sin material). */
+export const materialMap = z.record(z.string().max(200), z.string().max(40)).refine((m) => Object.keys(m).length <= 20000);

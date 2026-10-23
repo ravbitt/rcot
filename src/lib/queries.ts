@@ -1,8 +1,8 @@
 import "server-only";
 import { asc, count, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { dimension, folder, model, sheet } from "@/db/schema";
-import type { Vec3 } from "@/lib/types";
+import { dimension, folder, material, model, sheet } from "@/db/schema";
+import type { Material, Vec3 } from "@/lib/types";
 
 export type ModelCardData = {
   id: string;
@@ -67,4 +67,12 @@ export async function getFolder(id: string) {
 /** Solo id y nombre, para los menús «Mover a…». */
 export async function folderOptions() {
   return db.select({ id: folder.id, name: folder.name }).from(folder).orderBy(asc(folder.name));
+}
+
+/** Catálogo de materiales, en su orden. */
+export async function listMaterials(): Promise<Material[]> {
+  return db
+    .select({ id: material.id, name: material.name, color: material.color, kind: material.kind, thickness: material.thickness })
+    .from(material)
+    .orderBy(asc(material.position), asc(material.createdAt));
 }

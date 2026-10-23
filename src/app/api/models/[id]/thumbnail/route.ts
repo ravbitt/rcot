@@ -13,9 +13,13 @@ export async function GET(request: Request, ctx: RouteContext<"/api/models/[id]/
   const token = new URL(request.url).searchParams.get("t");
   if (!(await canReadModel(id, token))) return new Response("No autorizado", { status: 401 });
   const [m] = await db.select({ thumbFile: model.thumbFile }).from(model).where(eq(model.id, id)).limit(1);
-  const png = m?.thumbFile ? await readStoredFile(m.thumbFile) : null;
+  if (!m?.thumbFile) return new Response("Sin miniatura", { status: 404 });
+  const etag = `"${m.thumbFile}"`;
+  const cache = { ETag: etag, "Cache-Control": "private, no-cache" };
+  if (request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers: cache });
+  const png = await readStoredFile(m.thumbFile);
   if (!png) return new Response("Sin miniatura", { status: 404 });
-  return new Response(new Uint8Array(png), { headers: { "Content-Type": "image/png", "Cache-Control": "private, max-age=86400" } });
+  return new Response(new Uint8Array(png), { headers: { "Content-Type": "image/png", ...cache } });
 }
 
 /** Guarda la miniatura que generó el navegador (PNG). Reemplaza la anterior. */

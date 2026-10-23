@@ -23,6 +23,16 @@ export type Dimension = {
   label: string | null;
 };
 
+// ── Materiales ──────────────────────────────────────────────────────────
+
+/** tablero y lamina se miden en m², liston en metros lineales, otro en unidades. */
+export type MaterialKind = "tablero" | "liston" | "lamina" | "otro";
+
+export type Material = { id: string; name: string; color: string; kind: MaterialKind; thickness: number | null };
+
+/** Material de cada pieza del modelo: nombre de la pieza → id del material. */
+export type MaterialMap = Record<string, string>;
+
 /** Malla de un cuerpo (pieza) del modelo, en mm. */
 export type MeshBody = {
   name: string;
@@ -78,6 +88,8 @@ export type SheetView = {
   marksColored?: boolean;
   /** Piezas que dibuja la vista (índices de cuerpo del modelo); ausente o vacío = todas */
   bodies?: number[] | null;
+  /** El relleno usa el color de cada pieza (ausente) o el de su material */
+  fillBy?: "piece" | "material";
 };
 
 /** Clave de pieza: globo con la marca del despiece que apunta a un punto visible de la pieza. */
@@ -146,7 +158,7 @@ export type SheetStyle = {
 export const DEFAULT_STYLE: SheetStyle = { dimText: 3, dimLine: 0.18, dimArrow: 2.6, lineVisible: 0.35, lineHidden: 0.2, markSize: 3.4 };
 
 /** Fila del despiece: un grupo de piezas iguales. Medidas en mm (largo ≥ ancho ≥ espesor). */
-export type PieceRow = { mark: string; name: string; qty: number; dims: [number, number, number]; color: string };
+export type PieceRow = { mark: string; name: string; qty: number; dims: [number, number, number]; color: string; material?: string };
 
 /** Tabla de despiece sobre la hoja (esquina superior izquierda en x, y). */
 export type SheetTable = {

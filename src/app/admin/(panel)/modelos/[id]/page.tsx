@@ -5,7 +5,7 @@ import { ModelWorkspace } from "@/components/admin/model-workspace";
 import { db } from "@/db";
 import { dimension, model, share, sheet } from "@/db/schema";
 import { requireAdmin } from "@/lib/dal";
-import { folderOptions } from "@/lib/queries";
+import { folderOptions, listMaterials } from "@/lib/queries";
 
 /** ¿Ya pasó la fecha? (vencimiento de un enlace) */
 const isPast = (d: Date | null) => !!d && d.getTime() < Date.now();
@@ -21,7 +21,7 @@ export default async function ModelPage({ params }: PageProps<"/admin/modelos/[i
   const { id } = await params;
   const [m] = await db.select().from(model).where(eq(model.id, id)).limit(1);
   if (!m) notFound();
-  const [dims, sheets, shares, folders] = await Promise.all([
+  const [dims, sheets, shares, folders, catalog] = await Promise.all([
     db.select().from(dimension).where(eq(dimension.modelId, id)).orderBy(asc(dimension.createdAt)),
     db
       .select({ id: sheet.id, name: sheet.name, data: sheet.data, updatedAt: sheet.updatedAt })
@@ -30,10 +30,22 @@ export default async function ModelPage({ params }: PageProps<"/admin/modelos/[i
       .orderBy(asc(sheet.position), asc(sheet.createdAt)),
     db.select().from(share).where(eq(share.modelId, id)).orderBy(desc(share.createdAt)),
     folderOptions(),
+    listMaterials(),
   ]);
   return (
     <ModelWorkspace
-      model={{ id: m.id, name: m.name, bodyCount: m.bodyCount, bbox: m.bbox, originalName: m.originalName, format: m.format, folderId: m.folderId }}
+      model={{
+        id: m.id,
+        name: m.name,
+        bodyCount: m.bodyCount,
+        bbox: m.bbox,
+        originalName: m.originalName,
+        format: m.format,
+        folderId: m.folderId,
+        meshVersion: m.meshFile.slice(0, 8),
+      }}
+      catalog={catalog}
+      materials={m.materials}
       folders={folders}
       dimensions={dims.map((d) => ({ id: d.id, kind: d.kind, a: d.a, b: d.b, c: d.c, offset: d.offset, axis: d.axis, label: d.label }))}
       sheets={sheets.map((s) => ({ id: s.id, name: s.name, data: s.data, updatedAt: s.updatedAt.toISOString() }))}

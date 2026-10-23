@@ -14,9 +14,12 @@ export default async function PanelLayout({ children }: LayoutProps<"/admin">) {
           </span>
           Cotas
         </Link>
-        <nav className="text-sm text-muted-foreground">
+        <nav className="flex gap-4 text-sm text-muted-foreground">
           <Link href="/admin" className="hover:text-foreground">
             Proyectos
+          </Link>
+          <Link href="/admin/materiales" className="hover:text-foreground">
+            Materiales
           </Link>
         </nav>
         <div className="ml-auto flex items-center gap-3 text-sm text-muted-foreground">

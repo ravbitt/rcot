@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { ChevronRight, Download, Eye, EyeOff, FileText, Folder, Link2, Maximize, Palette, Plus, Ruler, Trash2, X } from "lucide-react";
+import { ChevronRight, Download, Eye, EyeOff, FileText, Folder, Layers, Link2, Maximize, Plus, Ruler, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { SheetSvg } from "@/components/sheet/sheet-svg";
 import {
@@ -22,27 +22,53 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { MaterialsTab } from "@/components/admin/materials-tab";
+import { ReplaceFileButton } from "@/components/admin/replace-file-button";
 import { SharesPanel, type ShareRow } from "@/components/admin/shares-panel";
 import { ModelViewer } from "@/components/viewer/model-viewer";
+import { ColorControl, type ColorMode } from "@/components/viewer/color-control";
 import { ExplodeSlider } from "@/components/viewer/explode-slider";
 import { MarksControl, type MarksMode } from "@/components/viewer/marks-control";
 import { PiecesList } from "@/components/viewer/pieces-list";
-import { groupPieces, type PieceGroup } from "@/lib/geometry/pieces";
+import type { Body } from "@/lib/geometry/mesh";
+import { groupPieces } from "@/lib/geometry/pieces";
+import { materialBodyColors } from "@/lib/materials";
 import { useUnit } from "@/hooks/use-unit";
 import { deleteModel, moveModel, renameModel } from "@/lib/actions";
 import { dimension3dText } from "@/lib/geometry/dim";
 import type { MeasureDraft, ViewerCore } from "@/lib/viewer/core";
-import type { Dimension, DimensionAxis, DimensionKind, SheetData, Vec3 } from "@/lib/types";
+import type { Dimension, DimensionAxis, DimensionKind, Material, MaterialMap, SheetData, Vec3 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type ModelInfo = { id: string; name: string; bodyCount: number; bbox: [Vec3, Vec3]; originalName: string; format: string; folderId: string | null };
+type ModelInfo = {
+  id: string;
+  name: string;
+  bodyCount: number;
+  bbox: [Vec3, Vec3];
+  originalName: string;
+  format: string;
+  folderId: string | null;
+  /** Cambia al reemplazar el archivo: el visor vuelve a cargar la malla */
+  meshVersion: string;
+};
 type SheetRow = { id: string; name: string; data: SheetData; updatedAt: string };
 
-type Tab = "cotas" | "planos" | "compartir";
+type Tab = "cotas" | "materiales" | "planos" | "compartir";
 
-export function ModelWorkspace(props: { model: ModelInfo; folders: { id: string; name: string }[]; dimensions: Dimension[]; sheets: SheetRow[]; shares: ShareRow[] }) {
+export function ModelWorkspace(props: {
+  model: ModelInfo;
+  folders: { id: string; name: string }[];
+  dimensions: Dimension[];
+  sheets: SheetRow[];
+  shares: ShareRow[];
+  catalog: Material[];
+  materials: MaterialMap;
+}) {
   const { model } = props;
   const [tab, setTab] = useState<Tab>("cotas");
+  // Compartido entre las pestañas: lo que se asigna en «Materiales» se ve al volver a «Cotas 3D»
+  const [materials, setMaterials] = useState(props.materials);
+  const meshUrl = `/api/models/${model.id}/mesh?v=${model.meshVersion}`;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2">
@@ -51,6 +77,9 @@ export function ModelWorkspace(props: { model: ModelInfo; folders: { id: string;
         <ToggleGroup type="single" value={tab} onValueChange={(v) => v && setTab(v as Tab)} variant="outline" size="sm">
           <ToggleGroupItem value="cotas">
             <Ruler /> Cotas 3D
+          </ToggleGroupItem>
+          <ToggleGroupItem value="materiales">
+            <Layers /> Materiales
           </ToggleGroupItem>
           <ToggleGroupItem value="planos">
             <FileText /> Planos ({props.sheets.length})
@@ -65,10 +94,14 @@ export function ModelWorkspace(props: { model: ModelInfo; folders: { id: string;
               <Download /> {model.originalName}
             </a>
           </Button>
+          <ReplaceFileButton modelId={model.id} />
           <DeleteModelButton id={model.id} name={model.name} />
         </div>
       </div>
-      {tab === "cotas" && <DimensionsTab model={model} initial={props.dimensions} />}
+      {tab === "cotas" && <DimensionsTab key={model.meshVersion} model={model} meshUrl={meshUrl} initial={props.dimensions} catalog={props.catalog} materials={materials} />}
+      {tab === "materiales" && (
+        <MaterialsTab key={model.meshVersion} modelId={model.id} meshUrl={meshUrl} catalog={props.catalog} materials={materials} onChange={setMaterials} />
+      )}
       {tab === "planos" && <SheetsTab modelId={model.id} sheets={props.sheets} />}
       {tab === "compartir" && <SharesPanel target={{ modelId: model.id }} shares={props.shares} />}
     </div>
@@ -188,7 +221,19 @@ function measureStep(mode: MeasureMode, n: number) {
   return steps[n] ?? (curved ? "Mueve para ubicar la cota y haz clic" : "Mueve para ubicar la cota y haz clic");
 }
 
-function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimension[] }) {
+function DimensionsTab({
+  model,
+  meshUrl,
+  initial,
+  catalog,
+  materials,
+}: {
+  model: ModelInfo;
+  meshUrl: string;
+  initial: Dimension[];
+  catalog: Material[];
+  materials: MaterialMap;
+}) {
   const [dims, setDims] = useState(initial);
   const [selected, setSelected] = useState<string | null>(null);
   const [measuring, setMeasuring] = useState(false);
@@ -201,12 +246,18 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
   const [draft, setDraft] = useState<MeasureDraft>({ points: [], needed: 2 });
   const [bodies, setBodies] = useState<string[]>([]);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
-  const [pieces, setPieces] = useState<{ groups: PieceGroup[]; bodyGroup: number[] } | null>(null);
-  const [colored, setColored] = useState(false);
+  const [meshBodies, setMeshBodies] = useState<Body[] | null>(null);
+  const pieces = useMemo(() => (meshBodies ? groupPieces(meshBodies, materials) : null), [meshBodies, materials]);
+  const hasMaterials = !!pieces?.groups.some((g) => catalog.some((m) => m.id === g.materialId));
+  const [colored, setColored] = useState<ColorMode>(null);
   const [explode, setExplode] = useState(0);
   const [marksMode, setMarksMode] = useState<MarksMode>(null);
   const pieceMarks = useMemo(() => (marksMode && pieces ? { groups: pieces.groups, bodyGroup: pieces.bodyGroup, mode: marksMode } : null), [marksMode, pieces]);
-  const bodyColors = useMemo(() => (colored && pieces ? pieces.bodyGroup.map((g) => pieces.groups[g].color) : null), [colored, pieces]);
+  const bodyColors = useMemo(() => {
+    if (!colored || !pieces) return null;
+    if (colored === "material" && hasMaterials) return materialBodyColors(pieces.groups, pieces.bodyGroup, catalog);
+    return pieces.bodyGroup.map((g) => pieces.groups[g].color);
+  }, [colored, pieces, hasMaterials, catalog]);
   const core = useRef<ViewerCore | null>(null);
   const decimals = unit === "cm" ? 1 : 0;
 
@@ -262,7 +313,7 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
       <div className="relative min-h-[60svh] flex-1 p-2 lg:min-h-0">
         <ModelViewer
-          meshUrl={`/api/models/${model.id}/mesh`}
+          meshUrl={meshUrl}
           dimensions={dims}
           unit={unit}
           decimals={decimals}
@@ -277,7 +328,7 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
           onDraftChange={setDraft}
           onLoaded={({ bodies }) => {
             setBodies(bodies.map((b) => b.name));
-            setPieces(groupPieces(bodies));
+            setMeshBodies(bodies);
           }}
           bodyColors={bodyColors}
           explode={explode}
@@ -308,9 +359,7 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
               <ToggleGroupItem value="cm">cm</ToggleGroupItem>
               <ToggleGroupItem value="mm">mm</ToggleGroupItem>
             </ToggleGroup>
-            <Button size="icon-sm" variant={colored ? "default" : "ghost"} onClick={() => setColored((c) => !c)} title="Colorear piezas">
-              <Palette />
-            </Button>
+            <ColorControl value={colored} onChange={setColored} materials={hasMaterials} />
             <MarksControl value={marksMode} onChange={setMarksMode} />
             <ExplodeSlider
               value={explode}
@@ -381,10 +430,10 @@ function DimensionsTab({ model, initial }: { model: ModelInfo; initial: Dimensio
           </ul>
         </div>
         {pieces && (
-          <details className="border-t" open={colored}>
+          <details className="border-t" open={!!colored}>
             <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">Despiece ({pieces.groups.length} tipos)</summary>
             <div className="max-h-72 overflow-y-auto pb-2">
-              <PiecesList groups={pieces.groups} unit={unit} decimals={decimals} />
+              <PiecesList groups={pieces.groups} unit={unit} decimals={decimals} catalog={catalog} />
             </div>
           </details>
         )}

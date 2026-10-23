@@ -19,9 +19,10 @@ import { pieceAnchors, projectView, renderFill, VIEW_DIRS, viewSnapPoints } from
 import { circle3 } from "@/lib/geometry/dim";
 import { explodeBodies } from "@/lib/geometry/explode";
 import { groupPieces, toRows, type PieceGroup } from "@/lib/geometry/pieces";
+import { materialBodyColors } from "@/lib/materials";
 import { fitScale, MARGIN, paperToView, SCALES, sheetSize, TITLE_H, viewToPaper } from "@/lib/drawing/sheet-math";
 import { fetchMesh, type Body } from "@/lib/geometry/mesh";
-import type { SheetData, SheetDim, SheetDimKind, SheetDimOrient, SheetMark, SheetSize, SheetStyle, SheetTable, SheetView, TitleBlock, Vec2, ViewKind } from "@/lib/types";
+import type { Material, MaterialMap, SheetData, SheetDim, SheetDimKind, SheetDimOrient, SheetMark, SheetSize, SheetStyle, SheetTable, SheetView, TitleBlock, Vec2, ViewKind } from "@/lib/types";
 import { DEFAULT_STYLE } from "@/lib/types";
 import { SHEET_SIZES } from "@/lib/types";
 
@@ -32,7 +33,17 @@ type Drag = { kind: "view" | "text" | "table" | "mark"; id: string; start: Vec2;
 
 const KIND_ORDER: ViewKind[] = ["iso", "front", "right", "left", "back", "top", "iso-back"];
 
-export function SheetEditor(props: { sheetId: string; modelId: string; modelName: string; name: string; data: SheetData }) {
+export function SheetEditor(props: {
+  sheetId: string;
+  modelId: string;
+  modelName: string;
+  name: string;
+  data: SheetData;
+  /** Catálogo y material de cada pieza: columna «Material» de la tabla y relleno por material */
+  catalog: Material[];
+  materials: MaterialMap;
+  meshVersion: string;
+}) {
   const [data, setData] = useState<SheetData>(props.data);
   const [name, setName] = useState(props.name);
   const [selected, setSelected] = useState<string | null>(null);
@@ -86,20 +97,21 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
 
   const update = useCallback((fn: (d: SheetData) => SheetData) => setData((d) => fn(d)), []);
   // Grupos del despiece (todas las piezas del modelo): para elegir qué piezas dibuja cada vista
-  const allGroups = useMemo(() => (bodies ? groupPieces(bodies).groups : null), [bodies]);
+  const allGroups = useMemo(() => (bodies ? groupPieces(bodies, props.materials).groups : null), [bodies, props.materials]);
+  const hasMaterials = Object.values(props.materials).some((id) => props.catalog.some((m) => m.id === id));
 
   // ── Malla (para proyectar vistas) ──────────────────────────────────
   const ensureBodies = useCallback(async () => {
     if (bodies) return bodies;
     setBusy("Cargando modelo…");
     try {
-      const { bodies: b } = await fetchMesh(`/api/models/${props.modelId}/mesh`);
+      const { bodies: b } = await fetchMesh(`/api/models/${props.modelId}/mesh?v=${props.meshVersion}`);
       setBodies(b);
       return b;
     } finally {
       setBusy(null);
     }
-  }, [bodies, props.modelId]);
+  }, [bodies, props.modelId, props.meshVersion]);
 
   async function addView() {
     try {
@@ -134,13 +146,14 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
   }
 
   /**
-   * Relleno por pieza de una vista, con los mismos colores que el despiece (~10 px por mm de papel).
+   * Relleno de una vista con los mismos colores que el despiece, o con el de cada material (~10 px por mm de papel).
    * Los grupos se calculan sobre las piezas armadas (la explosión no cambia sus medidas).
    */
-  function fillFor(b: Body[], view: Pick<SheetView, "kind" | "bounds" | "scale" | "explode" | "bodies">) {
-    const { groups, bodyGroup } = groupPieces(b);
+  function fillFor(b: Body[], view: Pick<SheetView, "kind" | "bounds" | "scale" | "explode" | "bodies" | "fillBy">) {
+    const { groups, bodyGroup } = groupPieces(b, props.materials);
     const sub = viewSubset(b, view);
-    const colors = sub.idx.map((i) => groups[bodyGroup[i]].color);
+    const byMaterial = view.fillBy === "material" ? materialBodyColors(groups, bodyGroup, props.catalog) : null;
+    const colors = sub.idx.map((i) => byMaterial?.[i] ?? groups[bodyGroup[i]].color);
     return renderFill(explodeBodies(sub.bodies, view.explode ?? 0), view.kind, view.bounds, colors, 10 / view.scale);
   }
 
@@ -156,7 +169,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
       // Si la vista tenía claves, se vuelven a ubicar sobre la vista nueva (mismo modo: por tipo o todas)
       const old = (data.marks ?? []).filter((m) => m.viewId === view.id);
       const marks = old.length
-        ? computeMarks(b, { ...next, ...proj }, old.length > groupPieces(b).groups.length ? "all" : "type", { ...DEFAULT_STYLE, ...data.style })
+        ? computeMarks(b, { ...next, ...proj }, old.length > groupPieces(b, props.materials).groups.length ? "all" : "type", { ...DEFAULT_STYLE, ...data.style })
         : [];
       update((d) => ({
         ...d,
@@ -168,13 +181,13 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
     }
   }
 
-  async function toggleFill(view: SheetView, on: boolean) {
+  async function toggleFill(view: SheetView, on: boolean, fillBy = view.fillBy) {
     if (!on) return setView(view.id, { fill: null });
     try {
       const b = await ensureBodies();
       setBusy("Coloreando piezas…");
       await new Promise((r) => setTimeout(r, 20));
-      setView(view.id, { fill: fillFor(b, view) });
+      setView(view.id, { fill: fillFor(b, { ...view, fillBy }), fillBy });
     } catch (err) {
       console.error(err);
       toast.error("No se pudo colorear la vista");
@@ -188,7 +201,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
    * Los puntos se buscan sobre la parte visible de cada pieza (con la explosión de la vista).
    */
   function computeMarks(b: Body[], view: SheetView, mode: "type" | "all", style: SheetStyle): SheetMark[] {
-    const { groups, bodyGroup } = groupPieces(b);
+    const { groups, bodyGroup } = groupPieces(b, props.materials);
     // anclas solo de las piezas de la vista, devueltas en el índice de cada cuerpo
     const sub = viewSubset(b, view);
     const subAnchors = pieceAnchors(explodeBodies(sub.bodies, view.explode ?? 0), view.kind);
@@ -231,7 +244,7 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
   async function addTable(existing?: SheetTable) {
     try {
       const b = await ensureBodies();
-      const rows = toRows(groupPieces(b).groups);
+      const rows = toRows(groupPieces(b, props.materials).groups, props.catalog);
       if (existing) {
         update((d) => ({ ...d, tables: (d.tables ?? []).map((t) => (t.id === existing.id ? { ...t, rows } : t)) }));
         return;
@@ -717,6 +730,24 @@ export function SheetEditor(props: { sheetId: string; modelId: string; modelName
                 Color por pieza
                 <Switch checked={!!selView.fill} disabled={!!busy} onCheckedChange={(c) => toggleFill(selView, c)} />
               </label>
+              {selView.fill && hasMaterials && (
+                <ToggleGroup
+                  type="single"
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  value={selView.fillBy ?? "piece"}
+                  disabled={!!busy}
+                  onValueChange={(v) => v && toggleFill(selView, true, v as "piece" | "material")}
+                >
+                  <ToggleGroupItem value="piece" className="flex-1">
+                    Tipo de pieza
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="material" className="flex-1">
+                    Material
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              )}
               <PiecesControl
                 key={`pz-${selView.id}`}
                 view={selView}

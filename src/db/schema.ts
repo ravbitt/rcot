@@ -1,10 +1,24 @@
 // Tablas de la aplicación: modelos 3D, cotas, planos y enlaces para clientes.
 
 import { sql } from "drizzle-orm";
-import { boolean, check, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
-import type { DimensionAxis, DimensionKind, SheetData, Vec3 } from "@/lib/types";
+import { boolean, check, index, integer, jsonb, pgTable, real, text, timestamp } from "drizzle-orm/pg-core";
+import type { DimensionAxis, DimensionKind, MaterialKind, SheetData, Vec3 } from "@/lib/types";
 
 const ts = () => timestamp({ withTimezone: true });
+
+/** Catálogo de materiales (único para la cuenta): se asignan a las piezas de cada modelo. */
+export const material = pgTable("material", {
+  id: text().primaryKey(),
+  name: text().notNull(),
+  /** Color para el visor y los planos (#rrggbb) */
+  color: text().notNull(),
+  /** tablero (se mide en m²), liston (en metros), lamina (m²) u otro (en unidades) */
+  kind: text().$type<MaterialKind>().notNull().default("tablero"),
+  /** Espesor nominal en mm (ayuda a sugerir el material de cada pieza) */
+  thickness: real(),
+  position: integer().notNull().default(0),
+  createdAt: ts().defaultNow().notNull(),
+});
 
 /** Carpeta de un proyecto: agrupa modelos. Al borrarla, sus modelos quedan «sin carpeta». */
 export const folder = pgTable("folder", {
@@ -35,13 +49,17 @@ export const model = pgTable(
     bbox: jsonb().$type<[Vec3, Vec3]>().notNull(),
     /** Miniatura PNG (la genera el navegador al subir el modelo) */
     thumbFile: text(),
+    /** SHA-256 del archivo original: detecta archivos repetidos al subir */
+    fileHash: text(),
+    /** Material de cada pieza: nombre de la pieza → id del material (no depende del archivo) */
+    materials: jsonb().$type<Record<string, string>>().notNull().default({}),
     createdAt: ts().defaultNow().notNull(),
     updatedAt: ts()
       .defaultNow()
       .notNull()
       .$onUpdate(() => new Date()),
   },
-  (t) => [index().on(t.folderId)],
+  (t) => [index().on(t.folderId), index().on(t.fileHash)],
 );
 
 /** Cota 3D entre dos puntos del modelo (mm). `offset` es un punto por donde pasa la línea de cota. */

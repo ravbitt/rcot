@@ -104,5 +104,5 @@ export async function convertModel(data: Buffer, format: ModelFormat) {
   }
   const bodies: MeshBody[] = parts.map((p) => ({ name: p.name, positions: b64(p.positions), indices: b64(p.indices) }));
   const mesh: MeshData = { version: 1, units: "mm", bodies, bbox: [min, max] };
-  return { gz: gzipSync(JSON.stringify(mesh)), bodyCount: bodies.length, bbox: mesh.bbox };
+  return { gz: gzipSync(JSON.stringify(mesh)), bodyCount: bodies.length, bbox: mesh.bbox, names: bodies.map((b) => b.name) };
 }

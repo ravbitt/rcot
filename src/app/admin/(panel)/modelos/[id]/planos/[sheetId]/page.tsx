@@ -5,6 +5,7 @@ import { SheetEditor } from "@/components/sheet/sheet-editor";
 import { db } from "@/db";
 import { model, sheet } from "@/db/schema";
 import { requireAdmin } from "@/lib/dal";
+import { listMaterials } from "@/lib/queries";
 
 export const metadata: Metadata = { title: "Plano" };
 
@@ -12,11 +13,22 @@ export default async function SheetPage({ params }: PageProps<"/admin/modelos/[i
   await requireAdmin();
   const { id, sheetId } = await params;
   const [row] = await db
-    .select({ sheet, modelName: model.name })
+    .select({ sheet, modelName: model.name, materials: model.materials, meshFile: model.meshFile })
     .from(sheet)
     .innerJoin(model, eq(model.id, sheet.modelId))
     .where(and(eq(sheet.id, sheetId), eq(sheet.modelId, id)))
     .limit(1);
   if (!row) notFound();
-  return <SheetEditor sheetId={row.sheet.id} modelId={id} modelName={row.modelName} name={row.sheet.name} data={row.sheet.data} />;
+  return (
+    <SheetEditor
+      sheetId={row.sheet.id}
+      modelId={id}
+      modelName={row.modelName}
+      name={row.sheet.name}
+      data={row.sheet.data}
+      catalog={await listMaterials()}
+      materials={row.materials}
+      meshVersion={row.meshFile.slice(0, 8)}
+    />
+  );
 }

@@ -10,13 +10,14 @@ export async function GET(request: Request, ctx: RouteContext<"/api/models/[id]/
   const token = new URL(request.url).searchParams.get("t");
   if (!(await canReadModel(id, token))) return new Response("No autorizado", { status: 401 });
   const [m] = await db.select({ meshFile: model.meshFile }).from(model).where(eq(model.id, id)).limit(1);
-  const gz = m && (await readStoredFile(m.meshFile));
+  if (!m) return new Response("No encontrado", { status: 404 });
+  // El nombre del archivo cambia al reemplazar el modelo: sirve de ETag (el navegador revalida cada vez)
+  const etag = `"${m.meshFile}"`;
+  const cache = { ETag: etag, "Cache-Control": "private, no-cache" };
+  if (request.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers: cache });
+  const gz = await readStoredFile(m.meshFile);
   if (!gz) return new Response("No encontrado", { status: 404 });
   return new Response(new Uint8Array(gz), {
-    headers: {
-      "Content-Type": "application/json",
-      "Content-Encoding": "gzip",
-      "Cache-Control": "private, max-age=3600",
-    },
+    headers: { "Content-Type": "application/json", "Content-Encoding": "gzip", ...cache },
   });
 }
